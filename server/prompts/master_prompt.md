@@ -377,6 +377,18 @@ Use "qualified" or "declined" to reflect the final outcome.
 urgency: str
 Use "immediate", "standard", or "low" from route_case. If route_case was never called, use "low".
 
+emotional_state: str
+Pass the caller's emotional state as you classified it: "calm", "distressed", "urgent", or "guarded". This is important — a distressed caller is automatically queued a comfort follow-up, so set it accurately.
+
+caller_name: str
+The caller's name if you collected it. Omit if unknown.
+
+caller_email: str
+The caller's email if you collected it. Omit if unknown.
+
+appointment_slot: str
+The time preference the caller gave for a consultation, in their own words (e.g. "tomorrow afternoon", "Monday morning"). Omit if none was given.
+
 Return fields:
 You do not need to use the return value. The Python layer handles logging and post-call processing.
 

@@ -67,6 +67,12 @@ from mock_backend import BOUQUETS, KNOWN_CUSTOMERS
 from nemotron_llm import VLLMOpenAILLMService
 from nvidia_stt import NVidiaWebSocketSTTService
 from tools.case_router import route_case
+from tools.intake_assembly import (
+    build_transcript,
+    finalize_session,
+    new_intake_state,
+    update_intake_state,
+)
 from tools.sol_lookup import check_sol
 from tools.treatment_classifier import classify_treatment
 
@@ -201,6 +207,7 @@ async def get_call_info(call_sid: str) -> dict:
 async def run_bot(
     transport: BaseTransport,
     from_number: str | None = None,
+    session_id: str | None = None,
     audio_in_sample_rate: int = 16000,
     audio_out_sample_rate: int = 24000,
 ):
@@ -209,6 +216,7 @@ async def run_bot(
     Args:
         transport: The transport to use.
         from_number: Caller's phone number (Twilio path only) for known-customer lookup.
+        session_id: Unique session identifier (Twilio call SID, or generated).
         audio_in_sample_rate: Input audio sample rate in Hz. Defaults to 16000 (WebRTC).
         audio_out_sample_rate: Output audio sample rate in Hz. Defaults to 24000 (WebRTC).
     """
@@ -219,9 +227,37 @@ async def run_bot(
     # LLM-generated, so an unreachable endpoint here == total silence on the call.
     await check_nemotron_health()
 
-    # Per-call order state. Closed over by the tool functions below so each
-    # call gets its own isolated order.
+    # Per-call structured intake state. The LLM surfaces facts through the four
+    # tool calls; the handlers below merge each call's args/results into here, and
+    # on call end we build the follow-up queue and log intake + transcript + queue
+    # to S3 (see tools/intake_assembly.py). Closed over by the tools and handlers.
+    intake_state = new_intake_state(caller_phone=from_number, session_id=session_id)
+    logger.info("[POSTCALL] session_id={} caller_phone={}", intake_state["session_id"], from_number)
+    _finalized = {"done": False}
+
+    # Per-call order state (legacy flower tools, unused by the legal-intake flow).
     order: dict = {"items": [], "delivery": None}
+
+    async def _finalize_postcall(reason: str) -> None:
+        """Build the follow-up queue and log intake/transcript/queue to S3, once.
+
+        Triggered by end_call (normal close) or on_client_disconnected (caller
+        hung up / dropped). Guarded so it runs exactly once per call. The actual
+        work is blocking (boto3), so it runs in a worker thread.
+        """
+        if _finalized["done"]:
+            return
+        _finalized["done"] = True
+        logger.info("[POSTCALL] finalizing (trigger={})", reason)
+        try:
+            messages = context.get_messages()
+        except Exception:
+            messages = None
+        transcript = build_transcript(messages)
+        try:
+            await asyncio.to_thread(finalize_session, intake_state, transcript)
+        except Exception as e:
+            logger.error("[POSTCALL] finalize failed: {!r}", e)
 
     # --- Tools the LLM can call ---------------------------------------------
 
@@ -374,10 +410,15 @@ async def run_bot(
         the closing script. The pipeline flushes queued speech and hangs up."""
         args = params.arguments or {}
         logger.info(
-            "end_call invoked (decision={}, session_id={}) — pushing EndTaskFrame upstream",
+            "end_call invoked (decision={}, urgency={}, session_id={})",
             args.get("decision"),
+            args.get("urgency"),
             args.get("session_id"),
         )
+        # Capture the LLM's closing summary into intake state, then run the
+        # post-call queue + S3 logging before we tear the pipeline down.
+        update_intake_state(intake_state, "end_call", args, {})
+        await _finalize_postcall("end_call")
         await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         # run_llm=False prevents the LLM from generating a follow-up response
         # after this function returns — the goodbye should already be in flight.
@@ -410,6 +451,7 @@ async def run_bot(
             params.arguments,
         )
         logger.info("[TOOL] check_sol -> {}", result)
+        update_intake_state(intake_state, "check_sol", params.arguments or {}, result)
         await params.result_callback(result)
 
     async def classify_treatment_tool(params: FunctionCallParams) -> None:
@@ -434,6 +476,7 @@ async def run_bot(
             params.arguments,
         )
         logger.info("[TOOL] classify_treatment -> {}", result)
+        update_intake_state(intake_state, "classify_treatment", params.arguments or {}, result)
         await params.result_callback(result)
 
     async def route_case_tool(params: FunctionCallParams) -> None:
@@ -453,6 +496,7 @@ async def run_bot(
             params.arguments,
         )
         logger.info("[TOOL] route_case -> {}", result)
+        update_intake_state(intake_state, "route_case", params.arguments or {}, result)
         await params.result_callback(result)
 
     # Tool schemas advertised to the LLM. Arg names/types mirror master_prompt.md
@@ -528,11 +572,28 @@ async def run_bot(
         name="end_call",
         description=(
             "Signal that intake is complete. Call immediately after delivering the "
-            "closing script, even if the caller has not hung up."
+            "closing script, even if the caller has not hung up. Pass the final "
+            "summary fields so the post-call follow-up queue is built correctly."
         ),
         properties={
             "session_id": {"type": "string", "description": "Session identifier."},
             "decision": {"type": "string", "enum": ["qualified", "declined"]},
+            "urgency": {
+                "type": "string",
+                "enum": ["immediate", "standard", "low"],
+                "description": "From route_case; 'low' if route_case was not called.",
+            },
+            "emotional_state": {
+                "type": "string",
+                "enum": ["calm", "distressed", "urgent", "guarded"],
+                "description": "Caller's emotional state. 'distressed' queues a comfort follow-up.",
+            },
+            "caller_name": {"type": "string", "description": "Caller's name, if collected."},
+            "caller_email": {"type": "string", "description": "Caller's email, if collected."},
+            "appointment_slot": {
+                "type": "string",
+                "description": "Time preference the caller gave for a consultation, if any.",
+            },
         },
         required=[],
     )
@@ -744,6 +805,9 @@ async def run_bot(
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
+        # Safety net: if the caller hung up before the agent called end_call,
+        # still build the queue and log the session (guarded; no double-run).
+        await _finalize_postcall("disconnect")
         await worker.cancel()
 
     runner = WorkerRunner(handle_sigint=False)
@@ -756,6 +820,7 @@ async def bot(runner_args: RunnerArguments):
     """Main bot entry point."""
 
     from_number: str | None = None
+    session_id: str | None = None
     transport_overrides: dict = {}
 
     # Krisp is available when deployed to Pipecat Cloud
@@ -786,6 +851,8 @@ async def bot(runner_args: RunnerArguments):
 
             # Parse Twilio websocket and fetch call information
             _, call_data = await parse_telephony_websocket(runner_args.websocket)
+            # Use the Twilio call SID as the session id (S3 keys, queue payloads).
+            session_id = call_data["call_id"]
 
             # Fetch call information from Twilio REST API so we can personalize
             # the bot for known customers (see KNOWN_CUSTOMERS).
@@ -815,7 +882,9 @@ async def bot(runner_args: RunnerArguments):
             logger.error(f"Unsupported runner arguments type: {type(runner_args)}")
             return
 
-    await run_bot(transport, from_number=from_number, **transport_overrides)
+    await run_bot(
+        transport, from_number=from_number, session_id=session_id, **transport_overrides
+    )
 
 
 if __name__ == "__main__":
