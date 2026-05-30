@@ -1,15 +1,21 @@
-"""Realistic placeholder intake metrics for Morrison & Associates."""
+"""Intake metrics + call records. Live calls come from Supabase (RLS-scoped to the
+signed-in staff); demo data is the fallback when Supabase is unconfigured/empty."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
+import streamlit as st
+
+from auth import get_client, is_configured
 
 
 FIRM_NAME = "Morrison & Associates"
 FIRM_TAGLINE = "Personal Injury · California & Nevada"
 AVG_CASE_VALUE = 5_000
 
-AGENT_NAME = "LexIntake"
+AGENT_NAME = "FirstCall"
 AGENT_VERSION = "v3"
 AGENT_PROVIDER = "Pipecat Cloud · NVIDIA Nemotron 3 Super"
 
@@ -135,8 +141,8 @@ class CallRecord:
     summary: str
 
 
-def get_calls() -> list[CallRecord]:
-    """Recent intake calls handled by the LexIntake voice agent."""
+def _mock_calls() -> list[CallRecord]:
+    """Demo intake calls (fallback when Supabase is unconfigured/empty)."""
     return [
         CallRecord(
             "2025-11-04-a1f3", "Nov 4, 2025 · 11:42 PM", "Maria Delgado", "+1 (415) 555-0142",
@@ -199,6 +205,75 @@ def get_calls() -> list[CallRecord]:
             "Hit by distracted driver, in treatment, strong liability.",
         ),
     ]
+
+
+def _row_to_record(row: dict[str, Any]) -> CallRecord:
+    """Map a Supabase `calls` row to the dashboard's CallRecord dataclass."""
+    decision = (row.get("decision") or "").strip()
+    case_type = (row.get("case_type") or "").replace("_", " ").strip()
+    parts: list[str] = []
+    if row.get("severity_tier"):
+        parts.append(f"{row['severity_tier']} severity")
+    if row.get("state"):
+        parts.append(row["state"])
+    if row.get("attorney_tier"):
+        parts.append((row["attorney_tier"] or "").replace("_", " "))
+    summary = ", ".join(p for p in parts if p) or (row.get("transcript") or "")[:90]
+    ended = (str(row.get("ended_at") or ""))[:19].replace("T", " ")
+    return CallRecord(
+        call_id=row.get("session_id") or str(row.get("id") or "—"),
+        started_at=ended or "—",
+        caller=row.get("caller_name") or "Unknown caller",
+        phone=row.get("caller_phone") or "—",
+        case_type=case_type.title() if case_type else "—",
+        disposition=decision.capitalize() if decision else "—",
+        score=0,
+        duration="—",
+        channel="—",
+        language="—",
+        summary=summary,
+    )
+
+
+def get_calls() -> list[CallRecord]:
+    """Recent intake calls. Live from Supabase when signed in; demo data otherwise."""
+    if is_configured() and st.session_state.get("authed"):
+        client = get_client()
+        if client is not None:
+            try:
+                resp = (
+                    client.table("calls")
+                    .select("*")
+                    .order("ended_at", desc=True)
+                    .limit(200)
+                    .execute()
+                )
+                rows = resp.data or []
+                if rows:
+                    return [_row_to_record(r) for r in rows]
+            except Exception:
+                pass
+    return _mock_calls()
+
+
+def get_caller_history(phone: str) -> list[CallRecord]:
+    """All prior calls from a phone number — the returning-caller view."""
+    if not (phone and is_configured() and st.session_state.get("authed")):
+        return []
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("calls")
+            .select("*")
+            .eq("caller_phone", phone)
+            .order("ended_at", desc=True)
+            .execute()
+        )
+        return [_row_to_record(r) for r in (resp.data or [])]
+    except Exception:
+        return []
 
 
 def call_kpis(calls: list[CallRecord]) -> dict[str, int]:

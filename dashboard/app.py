@@ -1,4 +1,4 @@
-"""LexIntake — AI Intake console (Cekura × Agiloft styled, light theme)."""
+"""FirstCall — AI Intake console (Cekura × Agiloft styled, light theme)."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from data import (
     get_today,
     get_week,
 )
+
+import auth
 
 try:
     from mock_data import (
@@ -73,8 +75,28 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-PAGE = st.query_params.get("page", "calls")
+PUBLIC_PAGES = {"landing", "signup", "signin"}
+
+# Sign out: clear session then continue as a public visitor.
+if st.query_params.get("out"):
+    auth.sign_out()
+    for _k in ("firm_name", "signup_step", "signup_data"):
+        st.session_state.pop(_k, None)
+    st.query_params.clear()
+    st.query_params["page"] = "landing"
+    st.rerun()
+
+AUTHED = st.session_state.get("authed", False)
+_default_page = "calls" if AUTHED else "landing"
+PAGE = st.query_params.get("page", _default_page)
 FILTER = st.query_params.get("f", "all")
+
+# Gate: unauthenticated visitors can only see public pages.
+if not AUTHED and PAGE not in PUBLIC_PAGES:
+    PAGE = "landing"
+
+# Tenant (law firm) name — set during sign-up, defaults to the demo firm.
+FIRM = st.session_state.get("firm_name", FIRM_NAME)
 
 # ── Icons (Lucide-style strokes) ─────────────────────────────────────────────
 def _icon(paths: str) -> str:
@@ -374,10 +396,11 @@ tr.sel td {{ background:{CANVAS_SOFT}; }}
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 def render_sidebar() -> None:
-    initials = "".join(w[0] for w in AGENT_NAME.split())[:2].upper()
+    caps = [ch for ch in AGENT_NAME if ch.isupper()]
+    initials = ("".join(caps) or AGENT_NAME)[:2].upper()
     html = [
         f'<div class="sb-brand"><div class="sb-logo">{initials}</div>'
-        f'<div><div class="nm">{AGENT_NAME}</div><div class="sub">{FIRM_NAME}</div></div></div>',
+        f'<div><div class="nm">{AGENT_NAME}</div><div class="sub">{FIRM}</div></div></div>',
         '<div class="sb-nav">',
     ]
     for group, items in NAV:
@@ -388,6 +411,10 @@ def render_sidebar() -> None:
             html.append(
                 f'<a class="sb-item {active}" href="?page={key}" target="_self">{icon}<span>{label}</span></a>'
             )
+    html.append(
+        f'<div class="sb-group" style="margin-top:18px">ACCOUNT</div>'
+        f'<a class="sb-item" href="?page=landing&out=1" target="_self">{ICONS["globe"]}<span>Sign out</span></a>'
+    )
     html.append("</div>")
     st.sidebar.markdown("".join(html), unsafe_allow_html=True)
 
@@ -649,7 +676,7 @@ def page_overview() -> None:
             connector=dict(line=dict(color=HAIRLINE, width=1)),
         ))
         fig.update_layout(**light_layout(height=300))
-        st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
         st.markdown("</div>", unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="panel"><div class="eyebrow">30 days</div><h3>Top decline reasons</h3>'
@@ -662,7 +689,7 @@ def page_overview() -> None:
         ))
         fig.update_layout(**light_layout(height=300), showlegend=True,
                           legend=dict(font=dict(size=11, color=MUTE), x=1.0, y=0.5))
-        st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
@@ -677,7 +704,7 @@ def page_overview() -> None:
     fig.update_layout(**light_layout(height=360),
                       xaxis=dict(side="top", tickfont=dict(color=MUTE)),
                       yaxis=dict(autorange="reversed", tickfont=dict(color=MUTE)))
-    st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+    st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
     st.markdown("</div></div>", unsafe_allow_html=True)
 
 
@@ -716,7 +743,7 @@ def page_metrics() -> None:
         fig.update_layout(**light_layout(height=320),
                           yaxis=dict(range=[50, 100], gridcolor=HAIRLINE, tickfont=dict(color=MUTE)),
                           xaxis=dict(tickfont=dict(color=MUTE)))
-        st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
         st.markdown("</div>", unsafe_allow_html=True)
     with c2:
         st.markdown('<div class="panel"><div class="eyebrow">Latency</div><h3>Response time by version</h3>'
@@ -729,7 +756,7 @@ def page_metrics() -> None:
         fig.update_layout(**light_layout(height=320), bargap=0.4,
                           yaxis=dict(gridcolor=HAIRLINE, tickfont=dict(color=MUTE)),
                           xaxis=dict(tickfont=dict(color=MUTE)))
-        st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+        st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
         st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -777,7 +804,7 @@ def page_results() -> None:
     fig.update_layout(**light_layout(height=440), annotations=ann,
                       xaxis=dict(tickangle=-35, side="bottom", tickfont=dict(color=MUTE, size=10)),
                       yaxis=dict(tickfont=dict(color=MUTE, size=11)))
-    st.plotly_chart(fig, use_container_width=True, config=PLOT_CONFIG)
+    st.plotly_chart(fig, width="stretch", config=PLOT_CONFIG)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div style="height:16px"></div><div class="panel"><h3>Version notes</h3>', unsafe_allow_html=True)
@@ -901,7 +928,7 @@ def page_home() -> None:
 def page_agent() -> None:
     rows = [
         ("Agent name", AGENT_NAME),
-        ("Firm", f"{FIRM_NAME} — {FIRM_TAGLINE}"),
+        ("Firm", f"{FIRM} — {st.session_state.get('firm_tagline', FIRM_TAGLINE)}"),
         ("Active version", AGENT_VERSION),
         ("Orchestration", "Pipecat Cloud"),
         ("LLM", "NVIDIA Nemotron 3 Super 120B"),
@@ -928,20 +955,515 @@ def page_agent() -> None:
     )
 
 
-# ── Router ───────────────────────────────────────────────────────────────────
-render_sidebar()
-topbar()
+# ════════════════════════════════════════════════════════════════════════════
+# PUBLIC: marketing CSS + landing + sign-up journey
+# ════════════════════════════════════════════════════════════════════════════
+LP_ACCENT = "#6366f1"
+LP_ACCENT_2 = "#a855f7"
 
-ROUTES = {
-    "home": page_home,
-    "agent": page_agent,
-    "metrics": page_metrics,
-    "labs": page_labs,
-    "personality": page_personality,
-    "evaluator": page_evaluator,
-    "results": page_results,
-    "runs": page_runs,
-    "calls": page_calls,
-    "overview": page_overview,
+
+def _md(s: str, **_kwargs: object) -> None:
+    """Render raw HTML, stripping per-line indentation so Markdown
+    never reinterprets indented HTML as a code block.
+
+    Extra kwargs (e.g. ``unsafe_allow_html``) are accepted and ignored so
+    call sites can mirror ``st.markdown``'s signature."""
+    st.markdown("\n".join(line.lstrip() for line in s.splitlines()), unsafe_allow_html=True)
+
+
+def public_css() -> None:
+    st.markdown(
+        f"""
+<style>
+[data-testid="stSidebar"] {{ display:none !important; }}
+[data-testid="stMain"] {{ background:{CANVAS}; }}
+
+.lp {{ font-family:{FONT}; color:{INK}; }}
+.lp a {{ text-decoration:none; }}
+
+/* ── Dark hero block ── */
+.lp-dark {{
+  position:relative; background:#070708; color:#fafafa; overflow:hidden;
+  padding:0 24px 90px; margin-bottom:0;
+}}
+.lp-dark::before {{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 50% -8%, rgba(99,102,241,0.35), transparent 60%),
+    radial-gradient(40% 40% at 85% 10%, rgba(168,85,247,0.22), transparent 60%),
+    radial-gradient(45% 45% at 12% 20%, rgba(56,189,248,0.14), transparent 60%);
+}}
+.lp-dark::after {{
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+                   linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size:54px 54px;
+  -webkit-mask-image:radial-gradient(70% 60% at 50% 0%, #000, transparent 75%);
+          mask-image:radial-gradient(70% 60% at 50% 0%, #000, transparent 75%);
+}}
+.lp-inner {{ position:relative; z-index:2; max-width:1120px; margin:0 auto; }}
+
+/* nav */
+.lp-nav {{ display:flex; align-items:center; justify-content:space-between; padding:20px 4px; }}
+.lp-brand {{ display:flex; align-items:center; gap:10px; font-weight:600; font-size:16px; color:#fff; letter-spacing:-0.02em; }}
+.lp-logo {{ width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:13px; color:#fff; background:linear-gradient(135deg,{LP_ACCENT},{LP_ACCENT_2});
+  box-shadow:0 4px 16px rgba(99,102,241,0.5); }}
+.lp-navlinks {{ display:flex; gap:28px; align-items:center; }}
+.lp-navlinks a {{ color:#c7c7d1; font-size:14px; font-weight:500; transition:color .15s; }}
+.lp-navlinks a:hover {{ color:#fff; }}
+.lp-navcta {{ display:flex; gap:10px; align-items:center; }}
+.lp-btn {{ display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:600;
+  padding:9px 18px; border-radius:10px; transition:transform .15s, box-shadow .2s, background .2s; cursor:pointer; }}
+.lp-btn-ghost {{ color:#e7e7ee; }}
+.lp-btn-ghost:hover {{ color:#fff; }}
+.lp-btn-light {{ background:#fff; color:#0a0a0a; }}
+.lp-btn-light:hover {{ transform:translateY(-1px); box-shadow:0 10px 30px rgba(255,255,255,0.18); }}
+.lp-btn-grad {{ color:#fff; background:linear-gradient(135deg,{LP_ACCENT},{LP_ACCENT_2}); box-shadow:0 8px 26px rgba(99,102,241,0.45); }}
+.lp-btn-grad:hover {{ transform:translateY(-1px); box-shadow:0 12px 36px rgba(99,102,241,0.6); }}
+.lp-btn-lg {{ font-size:15px; padding:13px 24px; }}
+
+/* hero */
+.lp-hero {{ text-align:center; padding:54px 0 12px; }}
+.lp-pill {{ display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:500; color:#d7d7e6;
+  background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); padding:6px 14px; border-radius:9999px; margin-bottom:26px; }}
+.lp-pill .gd {{ width:7px; height:7px; border-radius:50%; background:#34d399; box-shadow:0 0 10px #34d399; }}
+.lp-hero h1 {{ font-size:clamp(40px,6.4vw,74px); line-height:1.03; font-weight:600; letter-spacing:-0.035em; margin:0 0 22px; }}
+.lp-grad {{ background:linear-gradient(120deg,#a5b4fc,#c084fc 60%,#f0abfc); -webkit-background-clip:text; background-clip:text; color:transparent; }}
+.lp-sub {{ font-size:19px; line-height:1.6; color:#b4b4c2; max-width:620px; margin:0 auto 34px; }}
+.lp-herocta {{ display:flex; gap:14px; justify-content:center; align-items:center; flex-wrap:wrap; }}
+.lp-trust {{ margin-top:26px; font-size:13px; color:#83838f; }}
+
+/* product mock */
+.lp-mockwrap {{ position:relative; z-index:2; max-width:1040px; margin:54px auto -150px; padding:0 12px; }}
+.lp-window {{ background:#0f0f12; border:1px solid rgba(255,255,255,0.1); border-radius:16px; overflow:hidden;
+  box-shadow:0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04); }}
+.lp-bar {{ display:flex; align-items:center; gap:7px; padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.08); }}
+.lp-bar .d {{ width:11px; height:11px; border-radius:50%; }}
+.lp-shot {{ display:grid; grid-template-columns:200px 1fr; background:#fff; }}
+.lp-msb {{ background:{SIDEBAR_BG}; border-right:1px solid {HAIRLINE}; padding:16px 12px; }}
+.lp-msb .b {{ display:flex; align-items:center; gap:9px; font-weight:600; font-size:13px; color:{INK}; margin-bottom:16px; }}
+.lp-msb .b i {{ width:24px; height:24px; border-radius:7px; background:linear-gradient(135deg,{LP_ACCENT},{LP_ACCENT_2}); display:inline-block; }}
+.lp-msb .it {{ font-size:12.5px; color:{MUTE}; padding:7px 9px; border-radius:7px; margin-bottom:3px; }}
+.lp-msb .it.on {{ background:#eceef1; color:{INK}; font-weight:600; }}
+.lp-msc {{ padding:20px; }}
+.lp-mkpis {{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px; }}
+.lp-mk {{ border:1px solid {HAIRLINE}; border-radius:11px; padding:13px 15px; }}
+.lp-mk .l {{ font-size:9.5px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; color:{MUTE}; }}
+.lp-mk .v {{ font-size:24px; font-weight:700; letter-spacing:-0.03em; color:{INK}; margin-top:5px; }}
+.lp-mk .v.a {{ color:{LP_ACCENT}; }}
+.lp-mtbl {{ border:1px solid {HAIRLINE}; border-radius:11px; overflow:hidden; }}
+.lp-mtbl .r {{ display:grid; grid-template-columns:1.3fr 1fr 1fr .8fr; gap:8px; padding:11px 14px; font-size:12px; color:{BODY}; border-bottom:1px solid {HAIRLINE_SOFT}; align-items:center; }}
+.lp-mtbl .r.h {{ background:{CANVAS_SOFT}; font-size:9.5px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; color:{MUTE}; }}
+.lp-mtbl .r:last-child {{ border-bottom:none; }}
+.lp-mid {{ font-family:{FONT_MONO}; font-size:11px; background:{CANVAS_SOFT}; border:1px solid {HAIRLINE}; border-radius:6px; padding:3px 7px; display:inline-block; }}
+.lp-mbadge {{ font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:9999px; }}
+
+/* ── Light sections ── */
+.lp-section {{ max-width:1120px; margin:0 auto; padding:96px 24px; }}
+.lp-eyebrow {{ font-size:12.5px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase;
+  background:linear-gradient(120deg,{LP_ACCENT},{LP_ACCENT_2}); -webkit-background-clip:text; background-clip:text; color:transparent; }}
+.lp-h2 {{ font-size:clamp(30px,4vw,44px); font-weight:600; letter-spacing:-0.03em; margin:12px 0 14px; color:{INK}; }}
+.lp-lead {{ font-size:18px; color:{MUTE}; max-width:600px; line-height:1.6; }}
+.lp-center {{ text-align:center; }}
+.lp-center .lp-lead {{ margin:0 auto; }}
+
+.lp-stats {{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; padding:56px 24px;
+  max-width:1120px; margin:0 auto; border-top:1px solid {HAIRLINE}; border-bottom:1px solid {HAIRLINE}; }}
+.lp-stat .n {{ font-size:42px; font-weight:700; letter-spacing:-0.04em;
+  background:linear-gradient(120deg,{INK},#525252); -webkit-background-clip:text; background-clip:text; color:transparent; }}
+.lp-stat .l {{ font-size:14px; color:{MUTE}; margin-top:6px; }}
+
+.lp-feats {{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:46px; }}
+.lp-feat {{ border:1px solid {HAIRLINE}; border-radius:16px; padding:26px; background:{CANVAS}; transition:transform .2s, box-shadow .25s, border-color .2s; }}
+.lp-feat:hover {{ transform:translateY(-4px); box-shadow:0 20px 50px rgba(10,10,10,0.08); border-color:#d8d8d8; }}
+.lp-feat .ic {{ width:42px; height:42px; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#fff;
+  background:linear-gradient(135deg,{LP_ACCENT},{LP_ACCENT_2}); box-shadow:0 8px 22px rgba(99,102,241,0.35); margin-bottom:16px; }}
+.lp-feat h3 {{ font-size:18px; font-weight:600; letter-spacing:-0.01em; margin:0 0 7px; color:{INK}; }}
+.lp-feat p {{ font-size:14.5px; line-height:1.6; color:{MUTE}; margin:0; }}
+
+.lp-steps {{ display:grid; grid-template-columns:repeat(3,1fr); gap:34px; margin-top:46px; }}
+.lp-step {{ position:relative; }}
+.lp-step .num {{ width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:16px; color:{INK}; background:{CANVAS_SOFT}; border:1px solid {HAIRLINE}; margin-bottom:16px; }}
+.lp-step h3 {{ font-size:18px; font-weight:600; margin:0 0 7px; color:{INK}; }}
+.lp-step p {{ font-size:14.5px; line-height:1.6; color:{MUTE}; margin:0; }}
+
+.lp-quote {{ max-width:860px; margin:0 auto; text-align:center; }}
+.lp-quote p {{ font-size:clamp(22px,3vw,30px); font-weight:500; letter-spacing:-0.02em; line-height:1.4; color:{INK}; }}
+.lp-quote .who {{ margin-top:22px; font-size:14px; color:{MUTE}; }}
+
+.lp-ctaband {{ position:relative; overflow:hidden; background:#070708; border-radius:24px; padding:64px 32px; text-align:center; }}
+.lp-ctaband::before {{ content:""; position:absolute; inset:0;
+  background:radial-gradient(60% 120% at 50% 0%, rgba(99,102,241,0.4), transparent 60%),
+             radial-gradient(50% 120% at 80% 100%, rgba(168,85,247,0.3), transparent 60%); }}
+.lp-ctaband > * {{ position:relative; z-index:2; }}
+.lp-ctaband h2 {{ font-size:clamp(28px,4vw,44px); font-weight:600; letter-spacing:-0.03em; color:#fff; margin:0 0 14px; }}
+.lp-ctaband p {{ font-size:17px; color:#b4b4c2; margin:0 auto 28px; max-width:520px; }}
+
+.lp-footer {{ border-top:1px solid {HAIRLINE}; }}
+.lp-footin {{ max-width:1120px; margin:0 auto; padding:40px 24px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; }}
+.lp-footin .c {{ font-size:13px; color:{MUTE}; }}
+.lp-footlinks {{ display:flex; gap:22px; }}
+.lp-footlinks a {{ font-size:13px; color:{MUTE}; }}
+.lp-footlinks a:hover {{ color:{INK}; }}
+
+/* ── Auth split layout ── */
+.lp-auth {{ display:grid; grid-template-columns:1.05fr 1fr; min-height:100vh; }}
+@media (max-width:900px) {{ .lp-auth {{ grid-template-columns:1fr; }} .lp-authleft {{ display:none; }} }}
+.lp-authleft {{ position:relative; background:#070708; color:#fafafa; padding:48px; overflow:hidden; }}
+.lp-authleft::before {{ content:""; position:absolute; inset:0;
+  background:radial-gradient(50% 50% at 30% 15%, rgba(99,102,241,0.35), transparent 60%),
+             radial-gradient(40% 40% at 90% 80%, rgba(168,85,247,0.25), transparent 60%); }}
+.lp-authleft > * {{ position:relative; z-index:2; }}
+.lp-authleft h2 {{ font-size:34px; font-weight:600; letter-spacing:-0.03em; line-height:1.15; margin:28px 0 16px; }}
+.lp-vp {{ display:flex; gap:13px; align-items:flex-start; margin-bottom:16px; font-size:15px; color:#cfcfda; }}
+.lp-vp .ck {{ flex-shrink:0; width:22px; height:22px; border-radius:6px; background:rgba(255,255,255,0.1);
+  display:flex; align-items:center; justify-content:center; color:#a5b4fc; }}
+.lp-authright {{ padding:48px 40px; display:flex; flex-direction:column; justify-content:center; max-width:560px; }}
+.lp-steps-dots {{ display:flex; gap:8px; margin-bottom:22px; }}
+.lp-dot {{ height:5px; border-radius:9999px; background:{HAIRLINE}; flex:1; transition:background .2s; }}
+.lp-dot.on {{ background:linear-gradient(90deg,{LP_ACCENT},{LP_ACCENT_2}); }}
+.lp-authright .step-lbl {{ font-size:12.5px; font-weight:600; color:{LP_ACCENT}; letter-spacing:.4px; text-transform:uppercase; }}
+.lp-authright h1 {{ font-size:27px; font-weight:600; letter-spacing:-0.03em; margin:8px 0 6px; color:{INK}; }}
+.lp-authright .desc {{ font-size:15px; color:{MUTE}; margin-bottom:8px; }}
+.lp-finish {{ text-align:center; padding:20px 0; }}
+.lp-finish .big {{ width:64px; height:64px; border-radius:18px; margin:0 auto 20px; display:flex; align-items:center; justify-content:center;
+  color:#fff; font-size:30px; background:linear-gradient(135deg,{LP_ACCENT},{LP_ACCENT_2}); box-shadow:0 14px 36px rgba(99,102,241,0.45); }}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def _check_icon() -> str:
+    return _icon('<path d="M20 6L9 17l-5-5"/>')
+
+
+def page_landing() -> None:
+    public_css()
+    fc_logo = "FC"
+    # ── Dark hero + product mock ──
+    _md(
+        f"""
+<div class="lp">
+<div class="lp-dark">
+  <div class="lp-inner">
+    <nav class="lp-nav">
+      <div class="lp-brand"><span class="lp-logo">{fc_logo}</span> FirstCall</div>
+      <div class="lp-navlinks">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
+        <a href="?page=signin" target="_self">Sign in</a>
+      </div>
+      <div class="lp-navcta">
+        <a class="lp-btn lp-btn-grad" href="?page=signup" target="_self">Get started</a>
+      </div>
+    </nav>
+
+    <div class="lp-hero">
+      <div class="lp-pill"><span class="gd"></span> Now answering in English &amp; Spanish · 24/7</div>
+      <h1>Never miss a case.<br>Your firm's intake,<br><span class="lp-grad">answered by AI.</span></h1>
+      <p class="lp-sub">FirstCall picks up every call — day, night, and weekend — qualifies the lead,
+      checks the statute of limitations, and books the consult. So your firm only talks to cases worth taking.</p>
+      <div class="lp-herocta">
+        <a class="lp-btn lp-btn-light lp-btn-lg" href="?page=signup" target="_self">Start free trial →</a>
+        <a class="lp-btn lp-btn-ghost lp-btn-lg" href="#how">See how it works</a>
+      </div>
+      <div class="lp-trust">No credit card required · Live in under 10 minutes · Trusted by 200+ PI firms</div>
+    </div>
+  </div>
+
+  <div class="lp-mockwrap">
+    <div class="lp-window">
+      <div class="lp-bar">
+        <span class="d" style="background:#ff5f57"></span>
+        <span class="d" style="background:#febc2e"></span>
+        <span class="d" style="background:#28c840"></span>
+      </div>
+      <div class="lp-shot">
+        <div class="lp-msb">
+          <div class="b"><i></i> FirstCall</div>
+          <div class="it">Home</div>
+          <div class="it">Metrics</div>
+          <div class="it">Results</div>
+          <div class="it on">Calls</div>
+          <div class="it">Overview</div>
+        </div>
+        <div class="lp-msc">
+          <div class="lp-mkpis">
+            <div class="lp-mk"><div class="l">Calls today</div><div class="v">23</div></div>
+            <div class="lp-mk"><div class="l">Qualified</div><div class="v a">14</div></div>
+            <div class="lp-mk"><div class="l">After-hours</div><div class="v">11</div></div>
+          </div>
+          <div class="lp-mtbl">
+            <div class="r h"><span>Caller</span><span>Case type</span><span>Disposition</span><span>Score</span></div>
+            <div class="r"><span>Maria Delgado</span><span>Auto accident</span><span><span class="lp-mbadge" style="background:{GREEN_BG};color:{GREEN_TX}">Qualified</span></span><span>96</span></div>
+            <div class="r"><span>James Okafor</span><span>Slip &amp; fall</span><span><span class="lp-mbadge" style="background:{GREEN_BG};color:{GREEN_TX}">Qualified</span></span><span>91</span></div>
+            <div class="r"><span>Priya Nair</span><span>Auto accident</span><span><span class="lp-mbadge" style="background:{RED_BG};color:{RED_TX}">Declined</span></span><span>88</span></div>
+            <div class="r"><span>Carlos Mendoza</span><span>Auto · ES</span><span><span class="lp-mbadge" style="background:{GREEN_BG};color:{GREEN_TX}">Qualified</span></span><span>94</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="height:170px"></div>
+
+<!-- stats -->
+<div class="lp-stats">
+  <div class="lp-stat"><div class="n">24/7</div><div class="l">Always answering, never on hold</div></div>
+  <div class="lp-stat"><div class="n">3.2×</div><div class="l">More qualified leads captured</div></div>
+  <div class="lp-stat"><div class="n">&lt;1s</div><div class="l">Average response latency</div></div>
+  <div class="lp-stat"><div class="n">$4,200</div><div class="l">Saved monthly vs. answering services</div></div>
+</div>
+
+<!-- features -->
+<div class="lp-section" id="features">
+  <div class="lp-eyebrow">Built for plaintiff firms</div>
+  <div class="lp-h2">Everything your intake team does — automatically.</div>
+  <p class="lp-lead">FirstCall isn't a generic chatbot. It's trained on personal-injury intake and graded on every call.</p>
+  <div class="lp-feats">
+    <div class="lp-feat"><div class="ic">{_icon('<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6 6l1.1-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>')}</div>
+      <h3>After-hours capture</h3><p>Evenings, nights, and weekends — the calls that used to hit voicemail now become signed cases.</p></div>
+    <div class="lp-feat"><div class="ic">{_check_icon()}</div>
+      <h3>Instant qualification</h3><p>Confirms injury, treatment, fault, and representation, then scores the lead before it reaches your team.</p></div>
+    <div class="lp-feat"><div class="ic">{_icon('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>')}</div>
+      <h3>Bilingual intake</h3><p>Seamless English and Spanish handling with a warm handoff to your bilingual staff when needed.</p></div>
+    <div class="lp-feat"><div class="ic">{_icon('<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/>')}</div>
+      <h3>Statute-of-limitations checks</h3><p>Flags time-barred matters automatically so you stop wasting consults on cases you can't take.</p></div>
+    <div class="lp-feat"><div class="ic">{_icon('<path d="M3 3v18h18"/><path d="M7 14l3-4 3 3 5-6"/>')}</div>
+      <h3>Quality, measured</h3><p>Every conversation is evaluated and trended — see exactly how your intake improves over time.</p></div>
+    <div class="lp-feat"><div class="ic">{_icon('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>')}</div>
+      <h3>Drops into your CRM</h3><p>Qualified leads, transcripts, and summaries flow straight to your inbox, Litify, or Clio.</p></div>
+  </div>
+</div>
+
+<!-- how it works -->
+<div class="lp-section" id="how" style="padding-top:0">
+  <div class="lp-eyebrow">Live in minutes</div>
+  <div class="lp-h2">Three steps to never missing a call.</div>
+  <div class="lp-steps">
+    <div class="lp-step"><div class="num">1</div><h3>Forward your number</h3><p>Point your after-hours or overflow line to FirstCall. No new hardware, no IT project.</p></div>
+    <div class="lp-step"><div class="num">2</div><h3>AI answers &amp; qualifies</h3><p>FirstCall greets the caller, gathers the facts, screens the matter, and books the consult.</p></div>
+    <div class="lp-step"><div class="num">3</div><h3>Qualified leads, delivered</h3><p>You wake up to scored, summarized, ready-to-sign cases — and a full audit trail.</p></div>
+  </div>
+</div>
+
+<!-- testimonial -->
+<div class="lp-section" style="padding-top:0">
+  <div class="lp-quote">
+    <p>“FirstCall booked four signed cases in its first weekend — calls we would have lost to voicemail. It paid for itself before Monday.”</p>
+    <div class="who"><b>Dana Morrison</b> · Managing Partner, Morrison &amp; Associates</div>
+  </div>
+</div>
+
+<!-- final CTA -->
+<div class="lp-section" id="pricing" style="padding-top:0">
+  <div class="lp-ctaband">
+    <h2>Stop losing cases to voicemail.</h2>
+    <p>Spin up your firm's AI intake line today. Free for 14 days — live before your next missed call.</p>
+    <a class="lp-btn lp-btn-light lp-btn-lg" href="?page=signup" target="_self">Create your workspace →</a>
+  </div>
+</div>
+
+<!-- footer -->
+<div class="lp-footer"><div class="lp-footin">
+  <div class="lp-brand" style="color:{INK}"><span class="lp-logo">{fc_logo}</span> FirstCall</div>
+  <div class="c">© 2026 FirstCall AI · Built on Pipecat &amp; NVIDIA Nemotron</div>
+  <div class="lp-footlinks"><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="?page=signin" target="_self">Sign in</a></div>
+</div></div>
+</div>
+"""
+    )
+
+
+PRACTICE_AREAS = ["Personal injury", "Auto accidents", "Medical malpractice",
+                  "Workers' compensation", "Mass tort", "General practice"]
+CALL_VOLUMES = ["Under 50 / month", "50–200 / month", "200–500 / month", "500+ / month"]
+PLANS = ["Starter — $299/mo", "Growth — $799/mo", "Firm — Custom"]
+
+
+def page_signup() -> None:
+    public_css()
+    if "signup_step" not in st.session_state:
+        st.session_state.signup_step = 1
+    step = st.session_state.signup_step
+    total = 3
+
+    left, right = st.columns([1.05, 1], gap="large")
+    with left:
+        vps = [
+            "Live in under 10 minutes — just forward a number",
+            "Answers 24/7 in English &amp; Spanish",
+            "Only pay for the calls worth taking",
+            "Free for 14 days · no credit card",
+        ]
+        vp_html = "".join(
+            f'<div class="lp-vp"><span class="ck">{_check_icon()}</span><span>{v}</span></div>' for v in vps
+        )
+        _md(
+            f"""
+<div class="lp"><div class="lp-authleft" style="border-radius:16px;min-height:560px">
+<div class="lp-brand"><span class="lp-logo">FC</span> FirstCall</div>
+<h2>Give your firm an<br>intake team that<br>never sleeps.</h2>
+{vp_html}
+<div style="margin-top:34px;padding:16px 18px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:12px;font-size:14px;color:#cfcfda">
+“We stopped losing weekend cases the day we switched on FirstCall.”<br>
+<span style="color:#8f8f9c">— Dana Morrison, Managing Partner</span>
+</div>
+</div></div>
+"""
+        )
+
+    with right:
+        dots = "".join(f'<span class="lp-dot {"on" if i <= step else ""}"></span>' for i in range(1, total + 1))
+        titles = {
+            1: ("Create your account", "Tell us who you are."),
+            2: ("About your firm", "We'll tune intake to your practice."),
+            3: ("Route your calls", "Where should FirstCall pick up?"),
+        }
+        if step <= total:
+            t, d = titles[step]
+            st.markdown(
+                f'<div class="lp"><div class="lp-authright" style="padding:8px 4px">'
+                f'<div class="lp-steps-dots">{dots}</div>'
+                f'<div class="step-lbl">Step {step} of {total}</div>'
+                f'<h1>{t}</h1><div class="desc">{d}</div></div></div>',
+                unsafe_allow_html=True,
+            )
+
+        if step == 1:
+            st.text_input("Work email", placeholder="you@firm.com", key="su_email")
+            st.text_input("Your full name", placeholder="Jane Advocate", key="su_name")
+            st.text_input("Firm name", placeholder="Morrison & Associates", key="su_firm")
+            c1, c2 = st.columns([1, 1])
+            if c2.button("Continue →", type="primary", key="su_next1"):
+                if st.session_state.get("su_firm"):
+                    st.session_state.signup_step = 2
+                    st.rerun()
+                else:
+                    st.warning("Please enter your firm name to continue.")
+            c1.markdown(
+                '<div class="lp" style="font-size:13px;color:#737373;padding-top:10px">Already have an account? '
+                '<a href="?page=signin" target="_self" style="color:#6366f1;font-weight:600">Sign in</a></div>',
+                unsafe_allow_html=True,
+            )
+
+        elif step == 2:
+            st.selectbox("Primary practice area", PRACTICE_AREAS, key="su_area")
+            st.text_input("States you practice in", placeholder="California, Nevada", key="su_states")
+            st.selectbox("Monthly call volume", CALL_VOLUMES, index=1, key="su_volume")
+            c1, c2 = st.columns([1, 1])
+            if c1.button("← Back", key="su_back2"):
+                st.session_state.signup_step = 1
+                st.rerun()
+            if c2.button("Continue →", type="primary", key="su_next2"):
+                st.session_state.signup_step = 3
+                st.rerun()
+
+        elif step == 3:
+            st.text_input("After-hours number to forward", placeholder="+1 (415) 555-0142", key="su_phone")
+            st.selectbox("Choose a plan", PLANS, index=1, key="su_plan")
+            st.checkbox("Forward only after business hours (recommended)", value=True, key="su_afterhours")
+            c1, c2 = st.columns([1, 1])
+            if c1.button("← Back", key="su_back3"):
+                st.session_state.signup_step = 2
+                st.rerun()
+            if c2.button("Create workspace ✓", type="primary", key="su_finish"):
+                st.session_state.authed = True
+                st.session_state.firm_name = st.session_state.get("su_firm") or FIRM_NAME
+                area = st.session_state.get("su_area", "Personal injury")
+                states = st.session_state.get("su_states") or "California"
+                st.session_state.firm_tagline = f"{area} · {states}"
+                st.session_state.signup_step = 4
+                st.rerun()
+
+        else:  # finished
+            firm = st.session_state.get("firm_name", FIRM_NAME)
+            _md(
+                f"""
+<div class="lp"><div class="lp-authright" style="padding:8px 4px">
+<div class="lp-finish">
+<div class="big">✓</div>
+<h1 style="text-align:center">Welcome to FirstCall, {firm}!</h1>
+<div class="desc" style="text-align:center">Your AI intake workspace is ready. Forward your number and you're live.</div>
+</div>
+</div></div>
+"""
+            )
+            _, mid, _ = st.columns([1, 2, 1])
+            if mid.button("Enter your dashboard →", type="primary", key="su_enter"):
+                st.session_state.pop("signup_step", None)
+                st.query_params.clear()
+                st.query_params["page"] = "home"
+                st.rerun()
+
+
+def page_signin() -> None:
+    public_css()
+    left, right = st.columns([1.05, 1], gap="large")
+    with left:
+        _md(
+            """
+<div class="lp"><div class="lp-authleft" style="border-radius:16px;min-height:520px">
+<div class="lp-brand"><span class="lp-logo">FC</span> FirstCall</div>
+<h2>Welcome back.<br>Your cases are<br>waiting.</h2>
+<div class="lp-vp"><span class="ck">✓</span><span>Every after-hours call, captured overnight</span></div>
+<div class="lp-vp"><span class="ck">✓</span><span>Scored, summarized, ready to sign</span></div>
+</div></div>
+"""
+        )
+    with right:
+        st.markdown(
+            '<div class="lp"><div class="lp-authright" style="padding:8px 4px">'
+            '<h1>Sign in to FirstCall</h1><div class="desc">Access your firm\'s intake dashboard.</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        st.text_input("Work email", placeholder="you@firm.com", key="si_email")
+        st.text_input("Password", type="password", placeholder="••••••••", key="si_pw")
+        if st.button("Sign in →", type="primary", key="si_go"):
+            ok, err = auth.sign_in(
+                st.session_state.get("si_email", ""), st.session_state.get("si_pw", "")
+            )
+            if ok:
+                st.session_state.firm_name = FIRM_NAME
+                st.query_params.clear()
+                st.query_params["page"] = "calls"
+                st.rerun()
+            else:
+                st.error(err or "Sign in failed.")
+        st.markdown(
+            '<div class="lp" style="font-size:13px;color:#737373;padding-top:10px">New to FirstCall? '
+            '<a href="?page=signup" target="_self" style="color:#6366f1;font-weight:600">Create a workspace</a></div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ── Router ───────────────────────────────────────────────────────────────────
+PUBLIC_ROUTES = {
+    "landing": page_landing,
+    "signup": page_signup,
+    "signin": page_signin,
 }
-ROUTES.get(PAGE, page_calls)()
+
+if PAGE in PUBLIC_PAGES:
+    PUBLIC_ROUTES[PAGE]()
+else:
+    render_sidebar()
+    topbar()
+    ROUTES = {
+        "home": page_home,
+        "agent": page_agent,
+        "metrics": page_metrics,
+        "labs": page_labs,
+        "personality": page_personality,
+        "evaluator": page_evaluator,
+        "results": page_results,
+        "runs": page_runs,
+        "calls": page_calls,
+        "overview": page_overview,
+    }
+    ROUTES.get(PAGE, page_calls)()

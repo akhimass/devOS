@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +33,7 @@ from tools.cekura_observe import send_call_to_cekura
 from tools.eval_loop import run_post_call_eval_loop
 from tools.post_call_queue import build_standard_queue
 from tools.s3_logger import log_session
+from tools.supabase_logger import record_call_to_supabase
 
 # Text injected to trigger the LLM's opening line — filtered out of the transcript.
 _GREETING_TRIGGER_MARKER = "The caller has just connected"
@@ -75,24 +75,35 @@ def append_tool_event(
     return event
 
 
-def read_tool_events(limit: int = 50) -> list[dict[str, Any]]:
-    """Read the most recent tool events from the shared JSONL log."""
+def read_tool_events(limit: int = 50, session_id: str | None = None) -> list[dict[str, Any]]:
+    """Read recent tool events from the shared JSONL log.
+
+    When ``session_id`` is given, returns only that session's events (the JSONL is
+    shared across calls, so concurrent calls must be filtered out), scanning the
+    whole file rather than just the tail.
+    """
 
     path = tool_event_log_path()
-    if limit <= 0 or not path.exists():
+    if not path.exists():
         return []
 
-    events: deque[dict[str, Any]] = deque(maxlen=limit)
+    matched: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line:
                 continue
             try:
-                events.append(json.loads(line))
+                event = json.loads(line)
             except json.JSONDecodeError:
                 logger.warning(f"[TOOL-EVENT] skipping malformed line in {path}")
-    return list(events)
+                continue
+            if session_id is not None and event.get("session_id") != session_id:
+                continue
+            matched.append(event)
+    if limit and limit > 0:
+        return matched[-limit:]
+    return matched
 
 
 def new_intake_state(
@@ -296,22 +307,36 @@ def finalize_session(
         logger.warning(
             "[POSTCALL] INTAKE_S3_BUCKET not set — queue built and logged, S3 upload skipped."
         )
-        return {"queue": queue_data, "s3": None, "cekura": cekura_result, "eval_loop": eval_loop_result}
-
-    s3_result = log_session(
-        bucket_name=bucket,
-        session_id=session_id,
-        intake_data=dict(intake_state),
-        transcript=transcript,
-        queue_data=queue_data,
-    )
-    if s3_result.get("all_success"):
-        logger.info("[POSTCALL] ✓ S3 upload ok: {}", s3_result)
+        s3_result = None
     else:
-        logger.error("[POSTCALL] ✖ S3 upload failed: {}", s3_result)
+        s3_result = log_session(
+            bucket_name=bucket,
+            session_id=session_id,
+            intake_data=dict(intake_state),
+            transcript=transcript,
+            queue_data=queue_data,
+        )
+        if s3_result.get("all_success"):
+            logger.info("[POSTCALL] ✓ S3 upload ok: {}", s3_result)
+        else:
+            logger.error("[POSTCALL] ✖ S3 upload failed: {}", s3_result)
+
+    # Persist the structured call to Supabase: upserts the caller (returning-caller
+    # match by phone), the call summary + transcript + intake JSON, the model/tool
+    # events, and the follow-up queue. Skipped gracefully if Supabase is unconfigured.
+    supabase_result = record_call_to_supabase(
+        intake_state=intake_state,
+        transcript=transcript,
+        events=read_tool_events(limit=0, session_id=str(session_id)),
+        queue_dict=queue_data,
+        call_ended_reason=call_ended_reason,
+        s3_keys=s3_result,
+    )
+
     return {
         "queue": queue_data,
         "s3": s3_result,
         "cekura": cekura_result,
         "eval_loop": eval_loop_result,
+        "supabase": supabase_result,
     }

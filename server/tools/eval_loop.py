@@ -201,7 +201,7 @@ def apply_prompt_patches(patch_block: str) -> Path:
     )
     updated = pattern.sub(replacement, text, count=1)
     path.write_text(updated, encoding="utf-8")
-        logger.info(f"[EVAL_LOOP] updated prompt patches in {path}")
+    logger.info(f"[EVAL_LOOP] updated prompt patches in {path}")
     return path
 
 
