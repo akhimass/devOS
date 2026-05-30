@@ -24,6 +24,7 @@ import random
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 from dotenv import load_dotenv
@@ -68,6 +69,7 @@ from nemotron_llm import VLLMOpenAILLMService
 from nvidia_stt import NVidiaWebSocketSTTService
 from tools.case_router import route_case
 from tools.intake_assembly import (
+    append_tool_event,
     build_transcript,
     finalize_session,
     new_intake_state,
@@ -415,6 +417,7 @@ async def run_bot(
             args.get("urgency"),
             args.get("session_id"),
         )
+        _emit_tool_event("end_call", "start", args)
         # Capture the LLM's closing summary into intake state, then run the
         # post-call queue + S3 logging before we tear the pipeline down.
         update_intake_state(intake_state, "end_call", args, {})
@@ -422,6 +425,7 @@ async def run_bot(
         await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         # run_llm=False prevents the LLM from generating a follow-up response
         # after this function returns — the goodbye should already be in flight.
+        _emit_tool_event("end_call", "end", args, {"ok": True, "run_llm": False})
         await params.result_callback(
             {"ok": True}, properties=FunctionCallResultProperties(run_llm=False)
         )
@@ -442,21 +446,34 @@ async def run_bot(
             logger.error("[TOOL] {} failed args={}: {!r}", fn.__name__, kwargs, e)
             return {"error": str(e), "note": "Tool call failed; continue intake gracefully."}
 
+    def _emit_tool_event(tool_name: str, phase: str, arguments: Any | None = None, result: Any | None = None, note: str | None = None) -> None:
+        append_tool_event(
+            tool_name=tool_name,
+            phase=phase,
+            session_id=intake_state["session_id"],
+            arguments=arguments or {},
+            result=result,
+            note=note,
+        )
+
     async def check_sol_tool(params: FunctionCallParams) -> None:
         """Check the filing window (statute of limitations) for the caller's state."""
         logger.info("[TOOL] check_sol args={}", params.arguments)
+        _emit_tool_event("check_sol", "start", params.arguments or {})
         result = _safe_call(
             check_sol,
             {"plaintiff_age": 30, "defendant_type": "private"},
             params.arguments,
         )
         logger.info("[TOOL] check_sol -> {}", result)
+        _emit_tool_event("check_sol", "end", params.arguments or {}, result)
         update_intake_state(intake_state, "check_sol", params.arguments or {}, result)
         await params.result_callback(result)
 
     async def classify_treatment_tool(params: FunctionCallParams) -> None:
         """Classify injury/treatment severity and surface red flags."""
         logger.info("[TOOL] classify_treatment args={}", params.arguments)
+        _emit_tool_event("classify_treatment", "start", params.arguments or {})
         result = _safe_call(
             classify_treatment,
             {
@@ -476,12 +493,14 @@ async def run_bot(
             params.arguments,
         )
         logger.info("[TOOL] classify_treatment -> {}", result)
+        _emit_tool_event("classify_treatment", "end", params.arguments or {}, result)
         update_intake_state(intake_state, "classify_treatment", params.arguments or {}, result)
         await params.result_callback(result)
 
     async def route_case_tool(params: FunctionCallParams) -> None:
         """Final qualification gate: decide accept/decline and attorney tier."""
         logger.info("[TOOL] route_case args={}", params.arguments)
+        _emit_tool_event("route_case", "start", params.arguments or {})
         result = _safe_call(
             route_case,
             {
@@ -496,6 +515,7 @@ async def run_bot(
             params.arguments,
         )
         logger.info("[TOOL] route_case -> {}", result)
+        _emit_tool_event("route_case", "end", params.arguments or {}, result)
         update_intake_state(intake_state, "route_case", params.arguments or {}, result)
         await params.result_callback(result)
 

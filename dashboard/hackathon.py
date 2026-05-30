@@ -8,12 +8,22 @@ Run: streamlit run dashboard/hackathon.py
 import json
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+try:
+    import streamlit.components.v1 as components  # type: ignore[reportMissingImports]
+except ImportError:  # pragma: no cover - optional in non-Streamlit test envs
+    components = None
+
+SERVER_DIR = Path(__file__).resolve().parents[1] / "server"
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
 
 from mock_data import (
     EVALUATORS,
@@ -24,6 +34,7 @@ from mock_data import (
     VERSION_NOTES,
     VERSION_SCORES,
 )
+from tools.intake_assembly import read_tool_events, tool_event_log_path  # type: ignore[reportMissingImports]
 
 st.set_page_config(
     page_title="PI Intake Agent — Cekura Eval",
@@ -76,6 +87,71 @@ st.markdown(
     "<p style='color:#8b949e;margin-top:-10px'>10 caller personas · 10 evaluators · 3 prompt iterations</p>",
     unsafe_allow_html=True,
 )
+
+
+def _render_tool_event_feed() -> None:
+    """Render a live feed of the most recent tool calls."""
+
+    if components is not None:
+        components.html(
+            """
+            <script>
+              setTimeout(function() {
+                window.parent.location.reload();
+              }, 1500);
+            </script>
+            """,
+            height=0,
+        )
+
+    st.markdown("<div class='section-title'>Live tool activity</div>", unsafe_allow_html=True)
+    st.caption(f"Polling {tool_event_log_path()}")
+
+    events = read_tool_events(limit=12)
+    if not events:
+        st.info("Waiting for the agent to call a tool…")
+        return
+
+    for event in reversed(events):
+        phase = str(event.get("phase") or "unknown")
+        tool_name = str(event.get("tool_name") or "unknown")
+        timestamp = str(event.get("timestamp") or "")
+        session_id = str(event.get("session_id") or "n/a")
+        arguments = event.get("arguments") or {}
+        result = event.get("result")
+        note = event.get("note")
+        accent = "#f59e0b" if phase == "start" else "#22c55e" if phase == "end" else "#6366f1"
+        phase_label = "CALLING" if phase == "start" else "DONE" if phase == "end" else phase.upper()
+
+        st.markdown(
+            f"""
+            <div style='background:#0f1117;border:1px solid #1c1f26;border-left:4px solid {accent};
+                        border-radius:12px;padding:14px 16px;margin-bottom:10px'>
+              <div style='display:flex;justify-content:space-between;gap:12px;align-items:center'>
+                <div style='font-weight:700;color:#ffffff'>{tool_name}</div>
+                <div style='font-size:0.72rem;color:#9ca3af'>
+                  <span style='background:{accent};color:#0b0f14;padding:2px 8px;border-radius:999px;font-weight:700'>{phase_label}</span>
+                  &nbsp; {timestamp}
+                </div>
+              </div>
+              <div style='font-size:0.78rem;color:#9ca3af;margin-top:4px'>Session: {session_id}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        arg_col, result_col = st.columns(2)
+        with arg_col:
+            st.caption("Arguments")
+            st.code(json.dumps(arguments, indent=2, ensure_ascii=False, default=str), language="json")
+        with result_col:
+            st.caption("Result")
+            if result is None:
+                st.info("Tool still running…")
+            else:
+                st.code(json.dumps(result, indent=2, ensure_ascii=False, default=str), language="json")
+        if note:
+            st.caption(f"Note: {note}")
+
 
 # ── Top score cards ───────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
@@ -244,6 +320,7 @@ with tab1:
 # ─────────────────────────────────────────────────────────────────────────────
 with tab2:
     st.markdown("#### Last call transcript (live from Pipecat Cloud)")
+    _render_tool_event_feed()
 
     col_a, col_b = st.columns([2, 1])
     with col_a:

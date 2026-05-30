@@ -15,17 +15,82 @@ the bot has no dependency on rich/openai or the harness's import-time side effec
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:  # pragma: no cover - allows test/import environments without loguru
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 from tools.post_call_queue import build_standard_queue
 from tools.s3_logger import log_session
 
 # Text injected to trigger the LLM's opening line — filtered out of the transcript.
 _GREETING_TRIGGER_MARKER = "The caller has just connected"
+
+
+def tool_event_log_path() -> Path:
+    """Return the shared JSONL path for live tool-call events."""
+
+    override = os.getenv("INTAKE_TOOL_EVENTS_PATH")
+    if override:
+        return Path(override).expanduser()
+    return Path(__file__).resolve().parents[2] / "runtime" / "tool_events.jsonl"
+
+
+def append_tool_event(
+    *,
+    tool_name: str,
+    phase: str,
+    session_id: str | None,
+    arguments: Any | None = None,
+    result: Any | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Append a single structured tool event to the shared JSONL stream."""
+
+    event = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool_name": tool_name,
+        "phase": phase,
+        "session_id": session_id,
+        "arguments": dict(arguments or {}),
+        "result": result,
+        "note": note,
+    }
+    path = tool_event_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    return event
+
+
+def read_tool_events(limit: int = 50) -> list[dict[str, Any]]:
+    """Read the most recent tool events from the shared JSONL log."""
+
+    path = tool_event_log_path()
+    if limit <= 0 or not path.exists():
+        return []
+
+    events: deque[dict[str, Any]] = deque(maxlen=limit)
+    with path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                logger.warning(f"[TOOL-EVENT] skipping malformed line in {path}")
+    return list(events)
 
 
 def new_intake_state(
