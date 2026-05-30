@@ -16,11 +16,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-try:
-    import streamlit.components.v1 as components  # type: ignore[reportMissingImports]
-except ImportError:  # pragma: no cover - optional in non-Streamlit test envs
-    components = None
-
 SERVER_DIR = Path(__file__).resolve().parents[1] / "server"
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
@@ -92,20 +87,10 @@ st.markdown(
 def _render_tool_event_feed() -> None:
     """Render a live feed of the most recent tool calls."""
 
-    if components is not None:
-        components.html(
-            """
-            <script>
-              setTimeout(function() {
-                window.parent.location.reload();
-              }, 1500);
-            </script>
-            """,
-            height=0,
-        )
-
     st.markdown("<div class='section-title'>Live tool activity</div>", unsafe_allow_html=True)
-    st.caption(f"Polling {tool_event_log_path()}")
+    st.caption(
+        f"Reads the shared event log at {tool_event_log_path()} and updates when you click Refresh."
+    )
 
     events = read_tool_events(limit=12)
     if not events:
@@ -319,12 +304,22 @@ with tab1:
 # TAB 2: Live Transcript
 # ─────────────────────────────────────────────────────────────────────────────
 with tab2:
-    st.markdown("#### Last call transcript (live from Pipecat Cloud)")
+    st.markdown("#### Live tool activity")
+    top_controls = st.columns([1, 3])
+    with top_controls[0]:
+        if st.button("🔄 Refresh live tool activity", type="primary", key="refresh_tool_activity"):
+            st.rerun()
+    with top_controls[1]:
+        st.caption("No auto-refresh — click Refresh to pull the latest structured tool events.")
+
     _render_tool_event_feed()
+
+    st.divider()
+    st.markdown("#### Last call transcript (live from Pipecat Cloud)")
 
     col_a, col_b = st.columns([2, 1])
     with col_a:
-        if st.button("🔄 Fetch latest logs", type="primary"):
+        if st.button("🔄 Fetch latest logs", type="primary", key="fetch_latest_logs"):
             with st.spinner("Pulling from Pipecat Cloud…"):
                 result = subprocess.run(
                     ["uv", "run", "pcc", "agent", "logs", "flower-bot"],
@@ -377,22 +372,14 @@ with tab2:
             ("agent", "I'm sorry to hear that. Can I get your name and a bit more about the accident — were you at fault?"),
             ("user", "No, the other driver ran a red light. My name is Maria."),
             ("agent", "Thank you Maria. Are you currently represented by another attorney?"),
-            ("user", "No, I'm not."),
-            ("agent", "Great. Based on what you've shared, it sounds like you may have a strong case. I'd like to schedule a free consultation — would tomorrow afternoon work?"),
+            ("user", "No."),
+            ("agent", "Great, let me ask a few quick questions to see if we can help.")
         ]
-        for role, text in sample:
-            if role == "agent":
-                st.markdown(
-                    f"<div style='background:#161b22;border-left:3px solid #58a6ff;padding:8px 12px;border-radius:4px;margin:4px 0;font-size:0.9rem'>"
-                    f"<b style='color:#58a6ff'>Agent</b>&nbsp;&nbsp;{text}</div>",
-                    unsafe_allow_html=True,
-                )
+        for speaker, text in sample:
+            if speaker == "agent":
+                st.markdown(f"**Agent:** {text}")
             else:
-                st.markdown(
-                    f"<div style='background:#0d1117;border-left:3px solid #8b949e;padding:8px 12px;border-radius:4px;margin:4px 0;font-size:0.9rem'>"
-                    f"<b style='color:#8b949e'>Caller</b>&nbsp;&nbsp;{text}</div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"**User:** {text}")
 
         verdict_col, _ = st.columns([1, 2])
         with verdict_col:
@@ -403,7 +390,6 @@ with tab2:
                 "</div>",
                 unsafe_allow_html=True,
             )
-
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3: Failure Analysis
 # ─────────────────────────────────────────────────────────────────────────────
