@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     from pipecat.services.llm_service import FunctionCallParams
@@ -53,7 +53,7 @@ class PostCallQueue:
                 "task_type": task_type,
                 "priority": normalized_priority,
                 "payload": payload,
-                "added_at": datetime.utcnow().isoformat() + "Z",
+                "added_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
         )
 
@@ -84,7 +84,7 @@ class PostCallQueue:
         return {
             "tasks": self.get_queue(),
             "task_count": len(self.tasks),
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
 
 
