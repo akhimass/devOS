@@ -56,7 +56,11 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
-from pipecat.turns.user_turn_strategies import FilterIncompleteUserTurnStrategies
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import (
+    FilterIncompleteUserTurnStrategies,
+    UserTurnStrategies,
+)
 from pipecat.workers.runner import WorkerRunner
 
 from mock_backend import BOUQUETS, KNOWN_CUSTOMERS
@@ -653,6 +657,30 @@ async def run_bot(
         "[VAD] stop_secs={} confidence={}", vad_params.stop_secs, vad_params.confidence
     )
 
+    # Turn-taking finalizer (env-toggleable for A/B):
+    #   TURN_MODE=vad (default) — finalize the user turn on VAD silence + a
+    #     received transcript (SpeechTimeoutUserTurnStopStrategy). Robust on
+    #     noisy phone lines: the bot replies as soon as the caller pauses.
+    #   TURN_MODE=llm — gate turn completion on the LLM emitting a ✓ marker
+    #     (FilterIncompleteUserTurnStrategies). Smarter endpointing when the
+    #     line is quiet, but it STALLS on the phone: background noise yields
+    #     fragmented transcripts, the LLM keeps returning ○/◐ ("incomplete"),
+    #     and the bot never commits to a reply. That was the "no response when
+    #     we talk" bug, so we default away from it.
+    turn_mode = os.getenv("TURN_MODE", "vad").lower()
+    if turn_mode == "llm":
+        logger.info("[TURN] mode=llm (FilterIncompleteUserTurnStrategies)")
+        turn_strategies = FilterIncompleteUserTurnStrategies()
+    else:
+        logger.info("[TURN] mode=vad (SpeechTimeoutUserTurnStopStrategy)")
+        turn_strategies = UserTurnStrategies(
+            stop=[
+                SpeechTimeoutUserTurnStopStrategy(
+                    user_speech_timeout=float(os.getenv("USER_SPEECH_TIMEOUT", "0.6"))
+                )
+            ]
+        )
+
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
@@ -660,7 +688,7 @@ async def run_bot(
             vad_analyzer=SileroVADAnalyzer(
                 sample_rate=audio_in_sample_rate, params=vad_params
             ),
-            user_turn_strategies=FilterIncompleteUserTurnStrategies(),
+            user_turn_strategies=turn_strategies,
         ),
     )
 
