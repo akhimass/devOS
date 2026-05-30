@@ -15,6 +15,10 @@ import re
 from datetime import date
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 try:
     from pipecat.services.llm_service import FunctionCallParams
 except Exception:  # pragma: no cover - fallback for environments without pipecat installed
@@ -258,7 +262,7 @@ def _query_bedrock_sol(state: str, accident_date: str, defendant_type: str) -> d
 
     model_arn = os.getenv(
         "BEDROCK_MODEL_ARN",
-        "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-text-express-v1",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     )
     region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 

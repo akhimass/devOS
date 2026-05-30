@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
+
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 try:
     from pipecat.services.llm_service import FunctionCallParams
