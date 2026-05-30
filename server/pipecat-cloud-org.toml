@@ -1,0 +1,7 @@
+# Pipecat Cloud organization for this team (Voice Agent hackathon)
+# Used by Twilio TwiML: _pipecatCloudServiceHost = "{agent_name}.{org_name}"
+
+org_name = "saibha123"
+org_display_name = "Voice Agent"
+agent_name = "flower-bot"
+service_host = "flower-bot.saibha123"
