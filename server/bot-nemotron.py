@@ -842,12 +842,27 @@ async def run_bot(
     #   VAD_CONFIDENCE — speech-probability threshold. Raised to 0.7 (default 0.5) to
     #     suppress false interrupt triggers from Krisp/Twilio line noise now that
     #     interruptions are re-enabled (see ALLOW_INTERRUPTIONS below).
+    # Noise robustness (env-tunable): a loud demo room was tripping VAD on
+    # background chatter, firing spurious "user started speaking" -> interruption
+    # that cut the bot off mid-sentence. Defaults below gate that out:
+    #   VAD_CONFIDENCE — speech-probability threshold (0.8: ignore low-prob noise).
+    #   VAD_MIN_VOLUME — audio must be at least this loud to count as speech
+    #     (0.8: ignores far-field room chatter; the caller's own voice is louder).
+    #   VAD_START_SECS — require sustained speech before triggering (0.2: ignore
+    #     short noise blips like a cough/door/clap).
+    #   VAD_STOP_SECS  — silence after speech before the turn ends.
     vad_params = VADParams(
-        stop_secs=float(os.getenv("VAD_STOP_SECS", "0.5")),
-        confidence=float(os.getenv("VAD_CONFIDENCE", "0.7")),
+        confidence=float(os.getenv("VAD_CONFIDENCE", "0.8")),
+        start_secs=float(os.getenv("VAD_START_SECS", "0.2")),
+        stop_secs=float(os.getenv("VAD_STOP_SECS", "0.6")),
+        min_volume=float(os.getenv("VAD_MIN_VOLUME", "0.8")),
     )
     logger.info(
-        "[VAD] stop_secs={} confidence={}", vad_params.stop_secs, vad_params.confidence
+        "[VAD] confidence={} min_volume={} start_secs={} stop_secs={}",
+        vad_params.confidence,
+        vad_params.min_volume,
+        vad_params.start_secs,
+        vad_params.stop_secs,
     )
 
     # Turn-taking finalizer (env-toggleable for A/B):
