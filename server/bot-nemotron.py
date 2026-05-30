@@ -690,12 +690,42 @@ async def run_bot(
     )
 
     # Text-to-Speech service
-    tts = GradiumTTSService(
-        api_key=os.environ["GRADIUM_API_KEY"],
-        settings=GradiumTTSService.Settings(
-            voice=os.getenv("GRADIUM_VOICE_ID", "Eu9iL_CYe8N-Gkx_"),
-        ),
-    )
+    #
+    # TTS_PROVIDER selects the speech-output backend:
+    #   - "nvidia" (default): NVIDIA Magpie (magpie-tts-multilingual) over the
+    #     Riva/NIM gRPC endpoint, authenticated with the nvapi key. This is the
+    #     all-NVIDIA pipeline (Parakeet STT → Nemotron LLM → Magpie TTS).
+    #   - "gradium": Gradium streaming TTS (fallback if the NIM endpoint misbehaves).
+    # Voice/model/endpoint are env-overridable so we can point at a self-hosted
+    # Magpie NIM on AWS (NVIDIA_TTS_SERVER=host:port, NVIDIA_TTS_USE_SSL=false)
+    # instead of NVIDIA's cloud, keeping every layer on AWS if desired.
+    tts_provider = os.getenv("TTS_PROVIDER", "nvidia").lower()
+    if tts_provider == "gradium":
+        logger.info("TTS provider: Gradium")
+        tts = GradiumTTSService(
+            api_key=os.environ["GRADIUM_API_KEY"],
+            settings=GradiumTTSService.Settings(
+                voice=os.getenv("GRADIUM_VOICE_ID", "Eu9iL_CYe8N-Gkx_"),
+            ),
+        )
+    else:
+        from pipecat.services.nvidia.tts import NvidiaTTSService
+
+        magpie_voice = os.getenv("MAGPIE_VOICE", "Magpie-Multilingual.EN-US.Aria")
+        magpie_server = os.getenv("NVIDIA_TTS_SERVER", "grpc.nvcf.nvidia.com:443")
+        logger.info("TTS provider: NVIDIA Magpie (voice={}, server={})", magpie_voice, magpie_server)
+        tts = NvidiaTTSService(
+            api_key=os.getenv("NVIDIA_API_KEY") or os.environ["NEMOTRON_LLM_API_KEY"],
+            server=magpie_server,
+            use_ssl=os.getenv("NVIDIA_TTS_USE_SSL", "true").lower() == "true",
+            model_function_map={
+                "function_id": os.getenv(
+                    "MAGPIE_FUNCTION_ID", "877104f7-e885-42b9-8de8-f6e4c6303969"
+                ),
+                "model_name": os.getenv("MAGPIE_MODEL", "magpie-tts-multilingual"),
+            },
+            settings=NvidiaTTSService.Settings(voice=magpie_voice),
+        )
 
     # ToolsSchema (above) describes the tools to the LLM; register_function wires
     # each name to the handler the LLM will invoke. Both are required.
