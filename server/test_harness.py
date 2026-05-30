@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - allows test/import environments without openai
+    OpenAI = None  # type: ignore[assignment]
+
 from rich.console import Console
 from rich.syntax import Syntax
 
@@ -347,8 +352,12 @@ def _print_tool_call(name: str, arguments: dict[str, Any], result: dict[str, Any
     console.print(Syntax(_format_json(_compact_tool_result(name, result)), "json", theme="monokai", line_numbers=False))
 
 
-def _openai_client() -> OpenAI:
+def _openai_client() -> Any:
     """Construct the OpenAI client from environment variables."""
+
+    if OpenAI is None:
+        console.print("[red]Error:[/red] openai package is not installed in this environment.")
+        raise SystemExit(1)
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -357,7 +366,7 @@ def _openai_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def _call_model(client: OpenAI, messages: list[dict[str, Any]]) -> Any:
+def _call_model(client: Any, messages: list[dict[str, Any]]) -> Any:
     """Send the current message history to the OpenAI chat completions API."""
 
     return client.chat.completions.create(
