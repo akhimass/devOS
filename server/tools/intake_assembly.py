@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - allows test/import environments withou
     logger = logging.getLogger(__name__)
 
 from tools.cekura_observe import send_call_to_cekura
+from tools.eval_loop import run_post_call_eval_loop
 from tools.post_call_queue import build_standard_queue
 from tools.s3_logger import log_session
 
@@ -278,12 +279,24 @@ def finalize_session(
     else:
         logger.info("[CEKURA] observability upload result: {}", cekura_result)
 
+    eval_loop_result = None
+    if isinstance(cekura_result, dict) and cekura_result.get("id"):
+        try:
+            eval_loop_result = run_post_call_eval_loop(
+                observe_result=cekura_result,
+                call_id=str(session_id),
+            )
+            logger.info("[EVAL_LOOP] result: {}", eval_loop_result)
+        except Exception as exc:
+            logger.error(f"[EVAL_LOOP] failed for call {session_id}: {exc!r}")
+            eval_loop_result = {"status": "error", "error": str(exc)}
+
     bucket = os.getenv("INTAKE_S3_BUCKET")
     if not bucket:
         logger.warning(
             "[POSTCALL] INTAKE_S3_BUCKET not set — queue built and logged, S3 upload skipped."
         )
-        return {"queue": queue_data, "s3": None, "cekura": cekura_result}
+        return {"queue": queue_data, "s3": None, "cekura": cekura_result, "eval_loop": eval_loop_result}
 
     s3_result = log_session(
         bucket_name=bucket,
@@ -296,4 +309,9 @@ def finalize_session(
         logger.info("[POSTCALL] ✓ S3 upload ok: {}", s3_result)
     else:
         logger.error("[POSTCALL] ✖ S3 upload failed: {}", s3_result)
-    return {"queue": queue_data, "s3": s3_result, "cekura": cekura_result}
+    return {
+        "queue": queue_data,
+        "s3": s3_result,
+        "cekura": cekura_result,
+        "eval_loop": eval_loop_result,
+    }
