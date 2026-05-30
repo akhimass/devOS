@@ -627,21 +627,45 @@ async def run_bot(
     #     16 kHz, mono). This is the hackathon's shared ASR endpoint; it can spike
     #     to 5-25s under load, so we default away from it for reliable demos.
     # Flip back with STT_PROVIDER=nvidia once the shared endpoint calms down.
-    stt_provider = os.getenv("STT_PROVIDER", "gradium").lower()
-    if stt_provider == "nvidia":
-        logger.info("STT provider: NVIDIA Nemotron ASR")
-        stt = NVidiaWebSocketSTTService(
-            url=os.getenv("NVIDIA_ASR_URL", "ws://192.168.7.228:8081"),
-            strip_interim_prefix=True,
-            preroll_seconds=0.2,
-        )
-    else:
+    # STT_PROVIDER selects the transcription backend:
+    #   - "nvidia" (default): NVIDIA Parakeet via the Riva/NIM gRPC endpoint, same
+    #     reliable NVIDIA cloud + nvapi key as Magpie. This is the all-NVIDIA path.
+    #   - "nvidia_ws": the shared hackathon Parakeet WebSocket box (NVIDIA_ASR_URL).
+    #     Free but it spikes 5-25s under load and can drop transcripts — that was
+    #     the "greets but never replies to me" bug. Kept only as an escape hatch.
+    #   - "gradium": Gradium streaming STT (stable ~50ms) — non-NVIDIA fallback.
+    stt_provider = os.getenv("STT_PROVIDER", "nvidia").lower()
+    if stt_provider == "gradium":
         logger.info("STT provider: Gradium")
         stt = GradiumSTTService(
             api_key=os.environ["GRADIUM_API_KEY"],
             settings=GradiumSTTService.Settings(
                 language=Language.EN,
             ),
+        )
+    elif stt_provider in ("nvidia_ws", "parakeet_ws"):
+        logger.info("STT provider: NVIDIA Parakeet (shared WebSocket box)")
+        stt = NVidiaWebSocketSTTService(
+            url=os.getenv("NVIDIA_ASR_URL", "ws://192.168.7.228:8081"),
+            strip_interim_prefix=True,
+            preroll_seconds=0.2,
+        )
+    else:
+        from pipecat.services.nvidia.stt import NvidiaSTTService
+
+        stt_server = os.getenv("NVIDIA_STT_SERVER", "grpc.nvcf.nvidia.com:443")
+        logger.info("STT provider: NVIDIA Parakeet NIM (server={})", stt_server)
+        stt = NvidiaSTTService(
+            api_key=os.getenv("NVIDIA_API_KEY") or os.environ["NEMOTRON_LLM_API_KEY"],
+            server=stt_server,
+            use_ssl=os.getenv("NVIDIA_STT_USE_SSL", "true").lower() == "true",
+            sample_rate=16000,  # Parakeet expects 16 kHz; pipecat upsamples Twilio's 8 kHz
+            model_function_map={
+                "function_id": os.getenv(
+                    "PARAKEET_FUNCTION_ID", "bb0837de-8c7b-481f-9ec8-ef5663e9c1fa"
+                ),
+                "model_name": os.getenv("PARAKEET_MODEL", "nemotron-asr-streaming"),
+            },
         )
 
     # LLM service — Nemotron-3-Super-120B served by vLLM (OpenAI-compatible chat
