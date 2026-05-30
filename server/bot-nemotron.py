@@ -21,13 +21,17 @@ Run the bot using::
 import asyncio
 import os
 import random
+import time
 from datetime import date
+from pathlib import Path
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import EndTaskFrame, FunctionCallResultProperties, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -58,8 +62,93 @@ from pipecat.workers.runner import WorkerRunner
 from mock_backend import BOUQUETS, KNOWN_CUSTOMERS
 from nemotron_llm import VLLMOpenAILLMService
 from nvidia_stt import NVidiaWebSocketSTTService
+from tools.case_router import route_case
+from tools.sol_lookup import check_sol
+from tools.treatment_classifier import classify_treatment
 
 load_dotenv(override=True)
+
+# Directory of this file, so prompt loading works regardless of CWD (local vs the
+# Pipecat Cloud container, where this file is copied in as /app/bot.py).
+_HERE = Path(__file__).resolve().parent
+
+
+def load_system_prompt() -> str:
+    """Load the intake system prompt from prompts/master_prompt.md.
+
+    The deployed agent's persona lives in this file (Aria, Hartley & Associates
+    legal intake). If it is missing — e.g. the prompts/ dir was not copied into
+    the image — we log loudly and fall back to a minimal instruction so the bot
+    still speaks instead of failing silently.
+    """
+    prompt_path = _HERE / "prompts" / "master_prompt.md"
+    try:
+        text = prompt_path.read_text(encoding="utf-8")
+        logger.info(
+            "[PROMPT] loaded master_prompt.md from {} ({} chars, {} lines)",
+            prompt_path,
+            len(text),
+            text.count("\n") + 1,
+        )
+        return text
+    except FileNotFoundError:
+        logger.error(
+            "[PROMPT] master_prompt.md NOT FOUND at {} — falling back to minimal "
+            "instruction. (Is prompts/ copied into the Docker image?)",
+            prompt_path,
+        )
+        return (
+            "You are Aria, a warm, professional legal intake specialist at Hartley & "
+            "Associates. Greet the caller, then ask what happened and gather details "
+            "about the accident, injuries, treatment, fault, and prior representation. "
+            "Keep replies to 1–3 short spoken sentences. No markdown or lists."
+        )
+
+
+async def check_nemotron_health() -> None:
+    """Ping the configured Nemotron LLM endpoint once at startup and log the result.
+
+    This is the single most useful diagnostic for the "bot never speaks" failure:
+    the greeting is LLM-generated, so if this endpoint is unreachable from where
+    the bot is deployed (Pipecat Cloud), the bot produces no audio at all. The
+    .env / cloud secret set must point at a PUBLICLY reachable URL — a private
+    192.168.x.x address resolves from a laptop but never from the cloud.
+    """
+    base_url = os.getenv("NEMOTRON_LLM_URL", "http://192.168.7.228:8000/v1").rstrip("/")
+    models_url = f"{base_url}/models"
+    api_key = os.getenv("NEMOTRON_LLM_API_KEY", "EMPTY")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    logger.info("[HEALTH] pinging Nemotron LLM at {} …", models_url)
+    t0 = time.perf_counter()
+    try:
+        timeout = aiohttp.ClientTimeout(total=8)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(models_url, headers=headers) as resp:
+                elapsed = (time.perf_counter() - t0) * 1000
+                body = await resp.text()
+                if resp.status == 200:
+                    logger.info(
+                        "[HEALTH] ✓ Nemotron reachable ({:.0f}ms, HTTP {}): {}",
+                        elapsed,
+                        resp.status,
+                        body[:300],
+                    )
+                else:
+                    logger.error(
+                        "[HEALTH] ✖ Nemotron returned HTTP {} after {:.0f}ms: {}",
+                        resp.status,
+                        elapsed,
+                        body[:300],
+                    )
+    except Exception as e:
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.error(
+            "[HEALTH] ✖ Nemotron UNREACHABLE after {:.0f}ms from this deployment: {!r}. "
+            "If this is Pipecat Cloud, check NEMOTRON_LLM_URL in the secret set is a "
+            "public address (not 192.168.x.x).",
+            elapsed,
+            e,
+        )
 
 
 async def get_call_info(call_sid: str) -> dict:
@@ -120,6 +209,11 @@ async def run_bot(
         audio_out_sample_rate: Output audio sample rate in Hz. Defaults to 24000 (WebRTC).
     """
     logger.info("Starting bot")
+
+    # Startup health check: confirm the LLM endpoint is reachable from wherever
+    # this bot is actually running (laptop vs Pipecat Cloud). The greeting is
+    # LLM-generated, so an unreachable endpoint here == total silence on the call.
+    await check_nemotron_health()
 
     # Per-call order state. Closed over by the tool functions below so each
     # call gets its own isolated order.
@@ -272,10 +366,14 @@ async def run_bot(
         )
 
     async def end_call(params: FunctionCallParams) -> None:
-        """End the call. Only call this AFTER you have said goodbye to the
-        customer in the same turn. The pipeline will flush any queued speech
-        and then hang up."""
-        logger.info("end_call invoked — pushing EndTaskFrame upstream")
+        """Signal that intake is complete. Call this immediately after delivering
+        the closing script. The pipeline flushes queued speech and hangs up."""
+        args = params.arguments or {}
+        logger.info(
+            "end_call invoked (decision={}, session_id={}) — pushing EndTaskFrame upstream",
+            args.get("decision"),
+            args.get("session_id"),
+        )
         await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         # run_llm=False prevents the LLM from generating a follow-up response
         # after this function returns — the goodbye should already be in flight.
@@ -283,71 +381,178 @@ async def run_bot(
             {"ok": True}, properties=FunctionCallResultProperties(run_llm=False)
         )
 
-    tool_functions = [
-        list_bouquets,
-        check_availability,
-        add_to_order,
-        get_order_summary,
-        set_delivery_details,
-        place_order,
-        end_call,
-    ]
-    tools = ToolsSchema(standard_tools=tool_functions)
+    # --- Legal-intake knowledge sub-agent tools -----------------------------
+    # These wrap the pure functions in tools/. Each handler merges the model's
+    # arguments over safe defaults (per master_prompt.md) and filters to the
+    # function's real parameters, so an omitted/extra arg from the LLM never
+    # raises and kills the turn — it degrades to a sensible default instead.
 
-    # --- System instruction (varies based on caller ID) ---------------------
+    def _safe_call(fn, defaults: dict, args: dict) -> dict:
+        merged = {**defaults, **(args or {})}
+        allowed = fn.__code__.co_varnames[: fn.__code__.co_argcount]
+        kwargs = {k: v for k, v in merged.items() if k in allowed}
+        try:
+            return fn(**kwargs)
+        except Exception as e:  # never let a malformed tool call break the call
+            logger.error("[TOOL] {} failed args={}: {!r}", fn.__name__, kwargs, e)
+            return {"error": str(e), "note": "Tool call failed; continue intake gracefully."}
 
-    customer = KNOWN_CUSTOMERS.get(from_number or "")
-    if customer:
-        caller_context = (
-            f"This caller is a returning customer (caller ID matched). On file: "
-            f"name {customer['name']}, last order the {customer['last_order']} bouquet. "
-            'Greet them generically: "Welcome back to Field & Flower! How can I help '
-            'today?" Do not use their name or mention their last order in the greeting; '
-            "that comes across as surveilling. Once they say they want flowers, you "
-            "can offer their last order as a helpful shortcut, framed as record-keeping: "
-            f'"I have you down for the {customer["last_order"]} last time, want that '
-            'again or something different?" Always give them the alternative.'
+    async def check_sol_tool(params: FunctionCallParams) -> None:
+        """Check the filing window (statute of limitations) for the caller's state."""
+        logger.info("[TOOL] check_sol args={}", params.arguments)
+        result = _safe_call(
+            check_sol,
+            {"plaintiff_age": 30, "defendant_type": "private"},
+            params.arguments,
         )
-    else:
-        caller_context = (
-            "You're talking to a new customer. Introduce the shop briefly and ask how you can help."
-        )
+        logger.info("[TOOL] check_sol -> {}", result)
+        await params.result_callback(result)
 
-    system_instruction = (
-        "You are a friendly order-taker for Field & Flower, a neighborhood flower shop. "
-        "Help callers pick a bouquet and arrange delivery. Use the tools to look up "
-        "bouquets, check stock, add items, capture delivery details, and place the order. "
-        "Confirm the full order before calling place_order.\n\n"
-        "Talk like a real shop clerk on the phone — not a chatbot:\n"
-        "- Keep it to 1–2 short sentences per turn. Longer only when listing options or "
-        "doing the final order read-back.\n"
-        "- Ask ONE thing at a time. Don't ask for name, address, and date in one breath — "
-        "ask for the name, wait, then the next.\n"
-        '- Skip filler openers like "Absolutely!", "That sounds lovely!", "Perfect!", '
-        '"I\'d be happy to" — go straight to the point.\n'
-        "- Describe bouquets plainly. \"A dozen red roses with baby's breath, sixty-five "
-        'dollars." Not "a classic, romantic bouquet showing love and appreciation."\n'
-        "- When listing bouquets, ALWAYS lead with the bouquet's name. Format: "
-        '"<Name> — <description>, <price>." For example: "Spring Sunshine — yellow tulips '
-        'and daffodils, forty-five dollars." The name is how the caller refers back to it.\n'
-        "- When the caller mentions an occasion (birthday, Mother's Day, anniversary, "
-        "sympathy, etc.) or asks about specials/deals, pass those as filters to "
-        'list_bouquets (occasion="..." or specials_only=True) instead of reading the '
-        "full catalog. Don't list 15 bouquets when 3 are relevant.\n"
-        "- The catalog has many options — when listing, name at most 4 or 5 at a time. "
-        "If the caller doesn't bite, offer to share more.\n"
-        "- Don't restate what the customer just said back to them, except in the final "
-        "order confirmation.\n"
-        "- Use contractions. Fragments are fine.\n\n"
-        "Responses are spoken aloud. No bullet points, no emojis. Read prices in words "
-        '("forty-five dollars", not "$45.00").\n\n'
-        "When the order is placed and the customer has no more requests, or when they say "
-        'goodbye: say a short closing line (e.g. "Thanks, have a great day!") AND call '
-        "end_call in the same turn. Never call end_call without saying goodbye first.\n\n"
-        f"Today is {date.today().strftime('%A, %B %d, %Y')}. Use this when the caller "
-        'gives a relative delivery date like "this Friday" or "next Tuesday".\n\n'
-        f"Caller context: {caller_context}"
+    async def classify_treatment_tool(params: FunctionCallParams) -> None:
+        """Classify injury/treatment severity and surface red flags."""
+        logger.info("[TOOL] classify_treatment args={}", params.arguments)
+        result = _safe_call(
+            classify_treatment,
+            {
+                "injuries_described": "",
+                "er_visit": False,
+                "hospitalized": False,
+                "hospitalization_days": 0,
+                "surgery_required": False,
+                "loss_of_consciousness": False,
+                "persistent_headaches": False,
+                "spine_or_nerve_mentioned": False,
+                "physical_therapy": False,
+                "still_in_treatment": False,
+                "returned_to_work": True,
+                "psychological_symptoms": False,
+            },
+            params.arguments,
+        )
+        logger.info("[TOOL] classify_treatment -> {}", result)
+        await params.result_callback(result)
+
+    async def route_case_tool(params: FunctionCallParams) -> None:
+        """Final qualification gate: decide accept/decline and attorney tier."""
+        logger.info("[TOOL] route_case args={}", params.arguments)
+        result = _safe_call(
+            route_case,
+            {
+                "case_type": "other",
+                "severity_tier": "moderate",
+                "state": "",
+                "sol_viable": True,
+                "has_prior_representation": False,
+                "defendant_type": "private",
+                "estimated_case_value": "medium",
+            },
+            params.arguments,
+        )
+        logger.info("[TOOL] route_case -> {}", result)
+        await params.result_callback(result)
+
+    # Tool schemas advertised to the LLM. Arg names/types mirror master_prompt.md
+    # PHASE 2 exactly. `required` is kept minimal so the model is never forced to
+    # invent a value; the handlers default the rest.
+    check_sol_schema = FunctionSchema(
+        name="check_sol",
+        description=(
+            "Check the filing window (statute of limitations) for the caller's state. "
+            "Call silently the moment both state and accident_date are known."
+        ),
+        properties={
+            "state": {"type": "string", "description": "Two-letter US state code, e.g. 'CA'."},
+            "accident_date": {"type": "string", "description": "ISO date YYYY-MM-DD."},
+            "plaintiff_age": {"type": "integer", "description": "Approx caller age; default 30."},
+            "defendant_type": {
+                "type": "string",
+                "enum": ["private", "government"],
+                "description": "'government' if a city/state/municipality/govt vehicle is involved.",
+            },
+        },
+        required=["state", "accident_date"],
     )
+    classify_treatment_schema = FunctionSchema(
+        name="classify_treatment",
+        description=(
+            "Classify injury/treatment severity and red flags. Call silently after "
+            "Stage 3 once er_visit, hospitalized, and still_in_treatment are known."
+        ),
+        properties={
+            "injuries_described": {"type": "string", "description": "Concise injury summary."},
+            "er_visit": {"type": "boolean"},
+            "hospitalized": {"type": "boolean"},
+            "hospitalization_days": {"type": "integer", "description": "0 if not hospitalized."},
+            "surgery_required": {"type": "boolean"},
+            "loss_of_consciousness": {"type": "boolean"},
+            "persistent_headaches": {"type": "boolean"},
+            "spine_or_nerve_mentioned": {"type": "boolean"},
+            "physical_therapy": {"type": "boolean"},
+            "still_in_treatment": {"type": "boolean"},
+            "returned_to_work": {"type": "boolean"},
+            "psychological_symptoms": {"type": "boolean"},
+        },
+        required=["er_visit", "hospitalized", "still_in_treatment"],
+    )
+    route_case_schema = FunctionSchema(
+        name="route_case",
+        description=(
+            "Final qualification gate. Call after check_sol, classify_treatment, "
+            "case type, and prior-representation status are all known."
+        ),
+        properties={
+            "case_type": {
+                "type": "string",
+                "enum": [
+                    "mva", "slip_fall", "dog_bite", "trucking", "medmal",
+                    "product_liability", "workers_comp", "wrongful_death", "other",
+                ],
+            },
+            "severity_tier": {
+                "type": "string",
+                "enum": ["minor", "moderate", "severe", "catastrophic"],
+            },
+            "state": {"type": "string", "description": "Two-letter state code."},
+            "sol_viable": {"type": "boolean", "description": "viable result from check_sol."},
+            "has_prior_representation": {"type": "boolean"},
+            "defendant_type": {"type": "string", "enum": ["private", "government"]},
+            "estimated_case_value": {"type": "string", "enum": ["low", "medium", "high"]},
+        },
+        required=["case_type", "severity_tier", "sol_viable"],
+    )
+    end_call_schema = FunctionSchema(
+        name="end_call",
+        description=(
+            "Signal that intake is complete. Call immediately after delivering the "
+            "closing script, even if the caller has not hung up."
+        ),
+        properties={
+            "session_id": {"type": "string", "description": "Session identifier."},
+            "decision": {"type": "string", "enum": ["qualified", "declined"]},
+        },
+        required=[],
+    )
+
+    tools = ToolsSchema(
+        standard_tools=[
+            check_sol_schema,
+            classify_treatment_schema,
+            route_case_schema,
+            end_call_schema,
+        ]
+    )
+
+    # --- System instruction --------------------------------------------------
+    # The persona + intake flow + tool/decision logic lives in
+    # prompts/master_prompt.md (Aria, Hartley & Associates legal intake). We load
+    # it here and inject it as the LLM's system instruction. A short dated footer
+    # is appended so the model can resolve relative dates the caller mentions.
+    system_instruction = (
+        f"{load_system_prompt()}\n\n"
+        f"Today is {date.today().strftime('%A, %B %d, %Y')}. Use this to resolve "
+        'relative dates the caller mentions (e.g. "last Tuesday", "about three months ago").'
+    )
+    logger.info("[PROMPT] system_instruction preview: {}", system_instruction[:400].replace("\n", " "))
 
     # Speech-to-Text service
     #
@@ -396,12 +601,25 @@ async def run_bot(
     # when reasoning is enabled, not time-to-first-reasoning-token). No-op when
     # thinking is off. See server/nemotron_llm.py.
     enable_thinking = os.getenv("NEMOTRON_ENABLE_THINKING", "false").lower() == "true"
+    # Response shaping (env-toggleable for A/B):
+    #   LLM_MAX_TOKENS  — cap reply length so TTS playback stays short (default 200).
+    #   LLM_TEMPERATURE — low for consistent legal-intake slot-filling (default 0.4).
+    llm_max_tokens = int(os.getenv("LLM_MAX_TOKENS", "200"))
+    llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.4"))
+    logger.info(
+        "[LLM] config max_tokens={} temperature={} thinking={}",
+        llm_max_tokens,
+        llm_temperature,
+        enable_thinking,
+    )
     llm = VLLMOpenAILLMService(
         api_key=os.getenv("NEMOTRON_LLM_API_KEY", "EMPTY"),  # vLLM ignores unless --api-key set
         base_url=os.getenv("NEMOTRON_LLM_URL", "http://192.168.7.228:8000/v1"),
         settings=VLLMOpenAILLMService.Settings(
             model=os.getenv("NEMOTRON_LLM_MODEL", "nvidia/nemotron-3-super"),
             system_instruction=system_instruction,
+            max_tokens=llm_max_tokens,
+            temperature=llm_temperature,
             extra={"extra_body": {"chat_template_kwargs": {"enable_thinking": enable_thinking}}},
         ),
     )
@@ -414,16 +632,34 @@ async def run_bot(
         ),
     )
 
-    # ToolsSchema describes the tools to the LLM; register_direct_function
-    # wires the actual handlers the LLM will invoke. Both are required.
-    for fn in tool_functions:
-        llm.register_direct_function(fn)
+    # ToolsSchema (above) describes the tools to the LLM; register_function wires
+    # each name to the handler the LLM will invoke. Both are required.
+    llm.register_function("check_sol", check_sol_tool)
+    llm.register_function("classify_treatment", classify_treatment_tool)
+    llm.register_function("route_case", route_case_tool)
+    llm.register_function("end_call", end_call)
+
+    # Turn detection / endpointing (env-toggleable for A/B):
+    #   VAD_STOP_SECS  — silence after speech before the turn is considered over.
+    #     Silero's default is 0.8s; 0.5 shaves ~300ms off perceived latency per turn.
+    #   VAD_CONFIDENCE — speech-probability threshold. Raised to 0.7 (default 0.5) to
+    #     suppress false interrupt triggers from Krisp/Twilio line noise now that
+    #     interruptions are re-enabled (see ALLOW_INTERRUPTIONS below).
+    vad_params = VADParams(
+        stop_secs=float(os.getenv("VAD_STOP_SECS", "0.5")),
+        confidence=float(os.getenv("VAD_CONFIDENCE", "0.7")),
+    )
+    logger.info(
+        "[VAD] stop_secs={} confidence={}", vad_params.stop_secs, vad_params.confidence
+    )
 
     context = LLMContext(tools=tools)
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(sample_rate=audio_in_sample_rate),
+            vad_analyzer=SileroVADAnalyzer(
+                sample_rate=audio_in_sample_rate, params=vad_params
+            ),
             user_turn_strategies=FilterIncompleteUserTurnStrategies(),
         ),
     )
@@ -441,6 +677,12 @@ async def run_bot(
         ]
     )
 
+    # Interruptions re-enabled by default so the caller can barge in (natural
+    # conversation). Previously off to dodge Krisp/Twilio noise false-triggers;
+    # the raised VAD confidence above is the better fix. Toggle with
+    # ALLOW_INTERRUPTIONS=false to A/B.
+    allow_interruptions = os.getenv("ALLOW_INTERRUPTIONS", "true").lower() == "true"
+    logger.info("[PIPELINE] allow_interruptions={}", allow_interruptions)
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
@@ -448,7 +690,7 @@ async def run_bot(
             enable_usage_metrics=True,
             audio_in_sample_rate=audio_in_sample_rate,
             audio_out_sample_rate=audio_out_sample_rate,
-            allow_interruptions=False,
+            allow_interruptions=allow_interruptions,
         ),
     )
 
@@ -461,9 +703,14 @@ async def run_bot(
         context.add_message(
             {
                 "role": "user",
-                "content": "A customer just called. Greet them, 'This is Field & Flower, your local flower shop. How can I help you today?'",
+                "content": (
+                    "The caller has just connected. Open the call now using your exact "
+                    "opening script from your instructions (the Hartley & Associates "
+                    "greeting). Speak first — do not wait for the caller."
+                ),
             }
         )
+        logger.info("[GREETING] client connected — queuing LLMRunFrame to generate opening")
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")

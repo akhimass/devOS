@@ -31,7 +31,18 @@ Mirrors aiewf-eval's ``multi_turn_eval.services.vllm_openai.VLLMOpenAILLMService
 adapted to this pipecat's ``get_chat_completions(self, context)`` signature.
 """
 
+import time
+
+from loguru import logger
 from pipecat.services.openai.llm import OpenAILLMService
+
+
+def _preview(text: str, limit: int = 500) -> str:
+    """Truncate text for log output so we never dump a 600-line prompt."""
+    if text is None:
+        return "<none>"
+    text = str(text).replace("\n", " ")
+    return text if len(text) <= limit else f"{text[:limit]}… [+{len(text) - limit} chars]"
 
 
 class VLLMOpenAILLMService(OpenAILLMService):
@@ -50,21 +61,76 @@ class VLLMOpenAILLMService(OpenAILLMService):
         arming flag here.
         """
         self._ttft_armed = False
-        stream = await super().get_chat_completions(context)
+
+        # ---- DIAGNOSTIC: what we are about to send to the LLM --------------
+        try:
+            messages = context.get_messages()
+        except Exception as e:  # pragma: no cover - defensive logging only
+            messages = None
+            logger.warning(f"[LLM] could not read context messages: {e}")
+
+        system_msg = ""
+        last_user_msg = ""
+        if messages:
+            for m in messages:
+                role = m.get("role") if isinstance(m, dict) else getattr(m, "role", None)
+                content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+                if role == "system" and not system_msg:
+                    system_msg = content or ""
+                if role == "user":
+                    last_user_msg = content or last_user_msg
+
+        logger.info(
+            "[LLM] ▶ REQUEST model={} url={} msgs={} system_prompt='{}' last_user='{}'",
+            self.model_name,
+            str(getattr(self._client, "base_url", "?")),
+            len(messages) if messages else 0,
+            _preview(system_msg),
+            _preview(last_user_msg, 300),
+        )
+
+        t0 = time.perf_counter()
+
+        try:
+            stream = await super().get_chat_completions(context)
+        except Exception as e:
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.error("[LLM] ✖ ERROR opening stream after {:.0f}ms: {!r}", elapsed, e)
+            raise
 
         async def _armed_stream():
+            first_token_ms = None
+            content_acc = []
+            tool_calls_seen = False
             try:
                 async for chunk in stream:
-                    if not self._ttft_armed:
-                        choices = getattr(chunk, "choices", None)
-                        delta = getattr(choices[0], "delta", None) if choices else None
-                        # First non-thought token = first text content or tool call.
-                        if delta is not None and (
-                            getattr(delta, "content", None) or getattr(delta, "tool_calls", None)
-                        ):
+                    choices = getattr(chunk, "choices", None)
+                    delta = getattr(choices[0], "delta", None) if choices else None
+                    if delta is not None:
+                        piece = getattr(delta, "content", None)
+                        if piece:
+                            content_acc.append(piece)
+                        if getattr(delta, "tool_calls", None):
+                            tool_calls_seen = True
+                        if not self._ttft_armed and (piece or getattr(delta, "tool_calls", None)):
+                            # First non-thought token = first text content or tool call.
                             self._ttft_armed = True
+                            first_token_ms = (time.perf_counter() - t0) * 1000
+                            logger.info("[LLM] ⋯ first token at {:.0f}ms", first_token_ms)
                     yield chunk
+            except Exception as e:
+                elapsed = (time.perf_counter() - t0) * 1000
+                logger.error("[LLM] ✖ ERROR mid-stream after {:.0f}ms: {!r}", elapsed, e)
+                raise
             finally:
+                elapsed = (time.perf_counter() - t0) * 1000
+                logger.info(
+                    "[LLM] ◀ RESPONSE total={:.0f}ms ttft={} tool_calls={} text='{}'",
+                    elapsed,
+                    f"{first_token_ms:.0f}ms" if first_token_ms is not None else "NONE(no token!)",
+                    tool_calls_seen,
+                    _preview("".join(content_acc)),
+                )
                 # pipecat's _closing() only closes this wrapper generator; close the
                 # underlying OpenAI stream too (HTTP resource + uvloop asyncgen safety).
                 if hasattr(stream, "close"):

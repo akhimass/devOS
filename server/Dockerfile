@@ -20,3 +20,9 @@ COPY ./bot-nemotron.py bot.py
 COPY ./mock_backend.py mock_backend.py
 COPY ./nemotron_llm.py nemotron_llm.py
 COPY ./nvidia_stt.py nvidia_stt.py
+
+# Copy the system prompt (loaded at runtime by load_system_prompt()) and the
+# intake tool modules. Without this, prompts/master_prompt.md does not exist in
+# the container and the bot silently falls back to a minimal prompt.
+COPY ./prompts/ prompts/
+COPY ./tools/ tools/
