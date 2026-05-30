@@ -43,8 +43,10 @@ from pipecat.runner.types import (
 )
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.services.gradium.stt import GradiumSTTService
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
@@ -348,13 +350,27 @@ async def run_bot(
 
     # Speech-to-Text service
     #
-    # Nemotron Speech Streaming STT, served over WebSocket. The server expects
-    # 16-bit PCM, 16 kHz, mono — matching the WebRTC input path. The URL can be
-    # overridden via NVIDIA_ASR_URL.
-    stt = NVidiaWebSocketSTTService(
-        url=os.getenv("NVIDIA_ASR_URL", "ws://192.168.7.228:8081"),
-        strip_interim_prefix=True,
-    )
+    # STT_PROVIDER selects the transcription backend:
+    #   - "gradium" (default): Gradium streaming STT. Stable ~50ms latency.
+    #   - "nvidia": NVIDIA Nemotron Speech Streaming over WebSocket (16-bit PCM,
+    #     16 kHz, mono). This is the hackathon's shared ASR endpoint; it can spike
+    #     to 5-25s under load, so we default away from it for reliable demos.
+    # Flip back with STT_PROVIDER=nvidia once the shared endpoint calms down.
+    stt_provider = os.getenv("STT_PROVIDER", "gradium").lower()
+    if stt_provider == "nvidia":
+        logger.info("STT provider: NVIDIA Nemotron ASR")
+        stt = NVidiaWebSocketSTTService(
+            url=os.getenv("NVIDIA_ASR_URL", "ws://192.168.7.228:8081"),
+            strip_interim_prefix=True,
+        )
+    else:
+        logger.info("STT provider: Gradium")
+        stt = GradiumSTTService(
+            api_key=os.environ["GRADIUM_API_KEY"],
+            settings=GradiumSTTService.Settings(
+                language=Language.EN,
+            ),
+        )
 
     # LLM service — Nemotron-3-Super-120B served by vLLM (OpenAI-compatible chat
     # completions at /v1). vLLM exposes the Chat Completions API, not the Responses
