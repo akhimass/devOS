@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
+
 try:
     from loguru import logger
 except ImportError:  # pragma: no cover - allows test/import environments without loguru
@@ -40,12 +42,39 @@ _GREETING_TRIGGER_MARKER = "The caller has just connected"
 
 
 def tool_event_log_path() -> Path:
-    """Return the shared JSONL path for live tool-call events."""
+    """Return the shared JSONL path for local tool-call events."""
 
     override = os.getenv("INTAKE_TOOL_EVENTS_PATH")
     if override:
         return Path(override).expanduser()
     return Path(__file__).resolve().parents[2] / "runtime" / "tool_events.jsonl"
+
+
+def tool_events_api_url() -> str | None:
+    """Return the remote tool-events API base URL, if configured."""
+
+    return os.getenv("TOOL_EVENTS_API_URL", "").strip() or None
+
+
+def tool_events_api_token() -> str | None:
+    """Return the bearer token for the remote tool-events API, if configured."""
+
+    return os.getenv("TOOL_EVENTS_API_TOKEN", "").strip() or None
+
+
+def _tool_events_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    token = tool_events_api_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _tool_events_api_endpoint() -> str | None:
+    base_url = tool_events_api_url()
+    if not base_url:
+        return None
+    return f"{base_url.rstrip('/')}/tool-events"
 
 
 def append_tool_event(
@@ -57,7 +86,7 @@ def append_tool_event(
     result: Any | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
-    """Append a single structured tool event to the shared JSONL stream."""
+    """Append a single structured tool event to the configured event stream."""
 
     event = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -68,6 +97,18 @@ def append_tool_event(
         "result": result,
         "note": note,
     }
+
+    endpoint = _tool_events_api_endpoint()
+    if endpoint:
+        try:
+            response = requests.post(endpoint, headers=_tool_events_headers(), json=event, timeout=5)
+            response.raise_for_status()
+            payload = response.json()
+            return payload if isinstance(payload, dict) else event
+        except Exception as exc:
+            logger.error("[TOOL-EVENT] remote publish failed endpoint={}: {!r}", endpoint, exc)
+            return {**event, "remote_error": str(exc)}
+
     path = tool_event_log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -75,9 +116,7 @@ def append_tool_event(
     return event
 
 
-def read_tool_events(limit: int = 50) -> list[dict[str, Any]]:
-    """Read the most recent tool events from the shared JSONL log."""
-
+def _read_local_tool_events(limit: int = 50) -> list[dict[str, Any]]:
     path = tool_event_log_path()
     if limit <= 0 or not path.exists():
         return []
@@ -93,6 +132,40 @@ def read_tool_events(limit: int = 50) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 logger.warning(f"[TOOL-EVENT] skipping malformed line in {path}")
     return list(events)
+
+
+def read_tool_events(limit: int = 50, *, session_id: str | None = None, after_id: int | None = None) -> list[dict[str, Any]]:
+    """Read the most recent tool events from the configured source.
+
+    When TOOL_EVENTS_API_URL is configured, this reads from the remote FastAPI
+    service; otherwise it falls back to the local JSONL file for offline dev.
+    """
+
+    endpoint = _tool_events_api_endpoint()
+    if endpoint:
+        params: dict[str, Any] = {"limit": limit}
+        if session_id:
+            params["session_id"] = session_id
+        if after_id is not None:
+            params["after_id"] = after_id
+        try:
+            response = requests.get(endpoint, headers=_tool_events_headers(), params=params, timeout=5)
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, list):
+                return payload
+            logger.error("[TOOL-EVENT] unexpected remote payload type: {}", type(payload).__name__)
+        except Exception as exc:
+            logger.error("[TOOL-EVENT] remote fetch failed endpoint={}: {!r}", endpoint, exc)
+            return []
+
+    events = _read_local_tool_events(limit=limit)
+    if session_id:
+        events = [event for event in events if event.get("session_id") == session_id]
+    if after_id is not None:
+        # Local file mode has no numeric event ids; return the latest snapshot.
+        pass
+    return events
 
 
 def new_intake_state(

@@ -29,7 +29,11 @@ from mock_data import (
     VERSION_NOTES,
     VERSION_SCORES,
 )
-from tools.intake_assembly import read_tool_events, tool_event_log_path  # type: ignore[reportMissingImports]
+from tools.intake_assembly import (  # type: ignore[reportMissingImports]
+    read_tool_events,
+    tool_event_log_path,
+    tool_events_api_url,
+)
 
 st.set_page_config(
     page_title="PI Intake Agent — Cekura Eval",
@@ -88,9 +92,8 @@ def _render_tool_event_feed() -> None:
     """Render a live feed of the most recent tool calls."""
 
     st.markdown("<div class='section-title'>Live tool activity</div>", unsafe_allow_html=True)
-    st.caption(
-        f"Reads the shared event log at {tool_event_log_path()} and updates when you click Refresh."
-    )
+    source = tool_events_api_url() or f"local file {tool_event_log_path()}"
+    st.caption(f"Reads the live tool-event source at {source}. Click Refresh to pull the latest events.")
 
     events = read_tool_events(limit=12)
     if not events:
