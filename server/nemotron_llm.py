@@ -82,7 +82,7 @@ class VLLMOpenAILLMService(OpenAILLMService):
 
         logger.info(
             "[LLM] ▶ REQUEST model={} url={} msgs={} system_prompt='{}' last_user='{}'",
-            self.model_name,
+            self.get_full_model_name(),
             str(getattr(self._client, "base_url", "?")),
             len(messages) if messages else 0,
             _preview(system_msg),
