@@ -3,7 +3,7 @@ import { MOCK_CALLS } from "@/lib/mock"
 import type { Call, CallKpis } from "@/lib/types"
 
 const SELECT_COLS =
-  "id, session_id, caller_name, caller_phone, caller_email, case_type, state, decision, urgency, severity_tier, red_flags, sol_viable, sol_days_remaining, emotional_state, attorney_tier, appointment_slot, has_prior_representation, transcript, call_ended_reason, started_at, ended_at"
+  "id, session_id, caller_name, caller_phone, firm_phone, caller_email, case_type, state, decision, urgency, severity_tier, red_flags, sol_viable, sol_days_remaining, emotional_state, attorney_tier, appointment_slot, has_prior_representation, transcript, call_ended_reason, started_at, ended_at"
 
 const DEMO_CALLER_PHONE = "5703322862"
 

@@ -13,7 +13,7 @@ export function toolEventsSourceLabel(): string {
     return `${window.location.origin}/api/tool-events`
   }
   if (API_URL?.trim()) return API_URL.replace(/\/$/, "")
-  if (isSupabaseConfigured) return "Supabase model_events"
+  if (isSupabaseConfigured) return "Supabase live_tool_events"
   return "demo"
 }
 
@@ -67,8 +67,10 @@ async function fetchFromApi(limit = 24, sessionId?: string): Promise<ToolEvent[]
 
 async function fetchFromSupabase(limit = 24, sessionId?: string): Promise<ToolEvent[]> {
   if (!isSupabaseConfigured || !supabase) return []
+  // live_tool_events is the real-time stream the bot writes DURING each call
+  // (fire-and-forget). model_events is the per-call archive written at call end.
   let query = supabase
-    .from("model_events")
+    .from("live_tool_events")
     .select("id, session_id, tool_name, phase, arguments, result, note, event_ts")
     .order("event_ts", { ascending: false })
     .limit(limit)

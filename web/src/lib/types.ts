@@ -7,6 +7,7 @@ export interface Call {
   session_id: string
   caller_name: string | null
   caller_phone: string | null
+  firm_phone?: string | null
   caller_email: string | null
   case_type: string | null
   state: string | null

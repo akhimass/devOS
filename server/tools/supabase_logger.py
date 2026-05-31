@@ -11,6 +11,7 @@ Pipecat Cloud secret set / gitignored .env — never in the dashboard or git.
 from __future__ import annotations
 
 import os
+import threading
 from typing import Any
 
 try:
@@ -56,6 +57,36 @@ def _s3_keys(s3_result: Any | None) -> dict[str, Any]:
         "transcript_key": intake.get("transcript_key"),
         "queue_key": queue.get("queue_key"),
     }
+
+
+def record_live_event(event: dict[str, Any]) -> None:
+    """Insert one tool event into live_tool_events (the real-time stream). Best-effort."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.table("live_tool_events").insert(
+            {
+                "session_id": event.get("session_id"),
+                "firm_phone": os.getenv("TWILIO_PHONE_NUMBER"),
+                "tool_name": event.get("tool_name") or "unknown",
+                "phase": event.get("phase") or "",
+                "arguments": event.get("arguments") or {},
+                "result": event.get("result"),
+                "note": event.get("note"),
+                "event_ts": event.get("timestamp"),
+            }
+        ).execute()
+    except Exception as e:
+        logger.warning("[SUPABASE] live event insert failed: {!r}", e)
+
+
+def record_live_event_async(event: dict[str, Any]) -> None:
+    """Fire-and-forget live-event write in a daemon thread, so it never blocks or
+    adds latency to the in-progress call. No-op when Supabase is unconfigured."""
+    if not (os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY")):
+        return
+    threading.Thread(target=record_live_event, args=(event,), daemon=True).start()
 
 
 def record_call_to_supabase(

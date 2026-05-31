@@ -35,7 +35,7 @@ from tools.cekura_observe import send_call_to_cekura
 from tools.eval_loop import run_post_call_eval_loop
 from tools.post_call_queue import build_standard_queue
 from tools.s3_logger import log_session
-from tools.supabase_logger import record_call_to_supabase
+from tools.supabase_logger import record_call_to_supabase, record_live_event_async
 
 # Text injected to trigger the LLM's opening line — filtered out of the transcript.
 _GREETING_TRIGGER_MARKER = "The caller has just connected"
@@ -97,6 +97,9 @@ def append_tool_event(
         "result": result,
         "note": note,
     }
+
+    # Real-time stream to Supabase (fire-and-forget; never blocks the live call).
+    record_live_event_async(event)
 
     endpoint = _tool_events_api_endpoint()
     if endpoint:
@@ -194,6 +197,7 @@ def new_intake_state(
     """
     return {
         "session_id": session_id or uuid.uuid4().hex,
+        "firm_phone": os.getenv("TWILIO_PHONE_NUMBER"),
         "caller_name": None,
         "caller_phone": caller_phone,
         "caller_email": None,
