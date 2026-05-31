@@ -13,6 +13,7 @@ dependencies = [
     "boto3>=1.34.0",
     "python-dateutil>=2.8.2",
     "supabase>=2.0.0",
+    "pipecat-ai-flows>=1.2.0",
 ]
 
 [dependency-groups]

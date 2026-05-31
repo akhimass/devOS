@@ -653,31 +653,42 @@ async def run_bot(
     multilingual = agent_language.lower() == "multi"
     logger.info("[LANG] agent_language={} multilingual={}", agent_language, multilingual)
 
+    # --- Bot mode -------------------------------------------------------------
+    # BOT_MODE=prompt (default): one big system prompt (prompts/master_prompt.md);
+    #   the LLM decides when to call tools.
+    # BOT_MODE=flows: Pipecat Flows state machine (see intake_flow.py) — tools fire
+    #   as deterministic node transitions. Persona + per-stage instructions live in
+    #   the flow nodes, so the base system instruction is kept minimal here.
+    bot_mode = os.getenv("BOT_MODE", "prompt").lower()
+
     # --- System instruction --------------------------------------------------
-    # The persona + intake flow + tool/decision logic lives in
-    # prompts/master_prompt.md (Aria, Hartley & Associates legal intake). We load
-    # it here and inject it as the LLM's system instruction. A short dated footer
-    # is appended so the model can resolve relative dates the caller mentions.
-    system_instruction = (
-        f"{load_system_prompt()}\n\n"
-        f"Today is {date.today().strftime('%A, %B %d, %Y')}. Use this to resolve "
-        'relative dates the caller mentions (e.g. "last Tuesday", "about three months ago").'
-    )
-    if multilingual:
-        system_instruction += (
-            "\n\n# Language\n"
-            "The caller may speak ANY language. From their first words, detect the "
-            "language they are using and conduct the ENTIRE conversation in that same "
-            "language — every question, every script, and the closing. Mirror the "
-            "caller's language naturally and never switch languages unless they do."
+    if bot_mode == "flows":
+        system_instruction = f"Today is {date.today().strftime('%A, %B %d, %Y')}."
+        logger.info("[BOT] mode=flows — persona/stages come from the Flows graph")
+    else:
+        # The persona + intake flow + tool/decision logic lives in
+        # prompts/master_prompt.md (Aria, Hartley & Associates legal intake), injected
+        # as the LLM's system instruction with a dated footer for relative dates.
+        system_instruction = (
+            f"{load_system_prompt()}\n\n"
+            f"Today is {date.today().strftime('%A, %B %d, %Y')}. Use this to resolve "
+            'relative dates the caller mentions (e.g. "last Tuesday", "about three months ago").'
         )
-    elif not agent_language.lower().startswith("en"):
-        system_instruction += (
-            f"\n\n# Language\nConduct the ENTIRE conversation in {agent_language} — "
-            "every question, script, and the closing. The caller is speaking this "
-            "language; do not reply in English."
-        )
-    logger.info("[PROMPT] system_instruction preview: {}", system_instruction[:400].replace("\n", " "))
+        if multilingual:
+            system_instruction += (
+                "\n\n# Language\n"
+                "The caller may speak ANY language. From their first words, detect the "
+                "language they are using and conduct the ENTIRE conversation in that same "
+                "language — every question, every script, and the closing. Mirror the "
+                "caller's language naturally and never switch languages unless they do."
+            )
+        elif not agent_language.lower().startswith("en"):
+            system_instruction += (
+                f"\n\n# Language\nConduct the ENTIRE conversation in {agent_language} — "
+                "every question, script, and the closing. The caller is speaking this "
+                "language; do not reply in English."
+            )
+        logger.info("[PROMPT] system_instruction preview: {}", system_instruction[:400].replace("\n", " "))
 
     # Speech-to-Text service
     #
@@ -867,10 +878,13 @@ async def run_bot(
 
     # ToolsSchema (above) describes the tools to the LLM; register_function wires
     # each name to the handler the LLM will invoke. Both are required.
-    llm.register_function("check_sol", check_sol_tool)
-    llm.register_function("classify_treatment", classify_treatment_tool)
-    llm.register_function("route_case", route_case_tool)
-    llm.register_function("end_call", end_call)
+    # Prompt mode wires tools onto the LLM directly. In flows mode the FlowManager
+    # supplies each node's functions instead, so we skip static registration.
+    if bot_mode != "flows":
+        llm.register_function("check_sol", check_sol_tool)
+        llm.register_function("classify_treatment", classify_treatment_tool)
+        llm.register_function("route_case", route_case_tool)
+        llm.register_function("end_call", end_call)
 
     # Turn detection / endpointing (env-toggleable for A/B):
     #   VAD_STOP_SECS  — silence after speech before the turn is considered over.
@@ -924,8 +938,10 @@ async def run_bot(
             ]
         )
 
-    context = LLMContext(tools=tools)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    # Flows mode lets the FlowManager own the tools/messages per node, so start with
+    # a toolless context; prompt mode advertises the static ToolsSchema.
+    context = LLMContext() if bot_mode == "flows" else LLMContext(tools=tools)
+    context_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(
@@ -934,6 +950,8 @@ async def run_bot(
             user_turn_strategies=turn_strategies,
         ),
     )
+    user_aggregator = context_aggregator.user()
+    assistant_aggregator = context_aggregator.assistant()
 
     # Pipeline - assembled from reusable components
     pipeline = Pipeline(
@@ -965,6 +983,19 @@ async def run_bot(
         ),
     )
 
+    # In flows mode, build the FlowManager that drives the conversation graph
+    # (intake_flow.py). Tools fire as node transitions, not on the LLM's whim.
+    flow_manager = None
+    if bot_mode == "flows":
+        from intake_flow import build_intake_flow
+
+        flow_manager = build_intake_flow(
+            llm=llm,
+            context_aggregator=context_aggregator,
+            worker=worker,
+            intake_state=intake_state,
+        )
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected")
@@ -977,6 +1008,10 @@ async def run_bot(
         else:
             delay = float(os.getenv("GREETING_DELAY_SECS", "1.0"))
         await asyncio.sleep(delay)
+        if bot_mode == "flows" and flow_manager is not None:
+            logger.info("[GREETING] flows mode — initializing intake flow")
+            await flow_manager.initialize(flow_manager.entry_node)
+            return
         context.add_message(
             {
                 "role": "user",
