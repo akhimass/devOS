@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/auth/AuthProvider"
-import { FIRM_NAME } from "@/lib/mock"
 
 export default function SignIn() {
   const { signIn, signInDemo, authed } = useAuth()
@@ -44,7 +43,7 @@ export default function SignIn() {
 
   return (
     <AuthLayout
-      title={`${FIRM_NAME} console`}
+      title="FirstCall"
       subtitle="Sign in to review live intake calls and tool telemetry."
     >
       <form onSubmit={onSubmit} className="space-y-4">
