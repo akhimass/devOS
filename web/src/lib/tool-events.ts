@@ -4,45 +4,63 @@ import type { ToolEvent } from "@/lib/types"
 const API_URL = import.meta.env.VITE_TOOL_EVENTS_API_URL as string | undefined
 const API_TOKEN = import.meta.env.VITE_TOOL_EVENTS_API_TOKEN as string | undefined
 
-export const isToolEventsApiConfigured = Boolean(API_URL?.trim())
+export const isToolEventsApiConfigured = Boolean(
+  API_URL?.trim() || import.meta.env.PROD
+)
 
 export function toolEventsSourceLabel(): string {
-  if (isToolEventsApiConfigured) return API_URL!.replace(/\/$/, "")
+  if (import.meta.env.PROD && typeof window !== "undefined") {
+    return `${window.location.origin}/api/tool-events`
+  }
+  if (API_URL?.trim()) return API_URL.replace(/\/$/, "")
   if (isSupabaseConfigured) return "Supabase model_events"
   return "demo"
 }
 
-async function fetchFromApi(limit = 24, sessionId?: string): Promise<ToolEvent[]> {
-  if (!API_URL?.trim()) return []
+function buildApiRequests(limit: number, sessionId?: string): { url: string; headers: Record<string, string> }[] {
   const params = new URLSearchParams({ limit: String(limit) })
   if (sessionId) params.set("session_id", sessionId)
   const headers: Record<string, string> = {}
   if (API_TOKEN?.trim()) headers.Authorization = `Bearer ${API_TOKEN.trim()}`
-  try {
-    const res = await fetch(`${API_URL.replace(/\/$/, "")}/tool-events?${params}`, {
+
+  const requests: { url: string; headers: Record<string, string> }[] = [
+    { url: `/api/tool-events?${params}`, headers: {} },
+  ]
+  if (API_URL?.trim()) {
+    requests.push({
+      url: `${API_URL.replace(/\/$/, "")}/tool-events?${params}`,
       headers,
     })
-    if (!res.ok) return []
-    const payload = (await res.json()) as unknown
-    if (!Array.isArray(payload)) return []
-    return payload.map((row) => ({
-      id: (row as { id?: number }).id ?? crypto.randomUUID(),
-      timestamp: String((row as { timestamp?: string }).timestamp ?? ""),
-      tool_name: String((row as { tool_name?: string }).tool_name ?? "unknown"),
-      phase: String((row as { phase?: string }).phase ?? ""),
-      session_id: ((row as { session_id?: string }).session_id as string | null) ?? null,
-      arguments: ((row as { arguments?: Record<string, unknown> }).arguments ?? {}) as Record<
-        string,
-        unknown
-      >,
-      result: (row as { result?: unknown }).result ?? null,
-      note: ((row as { note?: string | null }).note as string | null) ?? null,
-      source: "api" as const,
-    }))
-  } catch {
-    // CORS/network failure — caller falls back to Supabase model_events.
-    return []
   }
+  return requests
+}
+
+async function fetchFromApi(limit = 24, sessionId?: string): Promise<ToolEvent[]> {
+  for (const { url, headers } of buildApiRequests(limit, sessionId)) {
+    try {
+      const res = await fetch(url, { headers })
+      if (!res.ok) continue
+      const payload = (await res.json()) as unknown
+      if (!Array.isArray(payload)) continue
+      return payload.map((row) => ({
+        id: (row as { id?: number }).id ?? crypto.randomUUID(),
+        timestamp: String((row as { timestamp?: string }).timestamp ?? ""),
+        tool_name: String((row as { tool_name?: string }).tool_name ?? "unknown"),
+        phase: String((row as { phase?: string }).phase ?? ""),
+        session_id: ((row as { session_id?: string }).session_id as string | null) ?? null,
+        arguments: ((row as { arguments?: Record<string, unknown> }).arguments ?? {}) as Record<
+          string,
+          unknown
+        >,
+        result: (row as { result?: unknown }).result ?? null,
+        note: ((row as { note?: string | null }).note as string | null) ?? null,
+        source: "api" as const,
+      }))
+    } catch {
+      continue
+    }
+  }
+  return []
 }
 
 async function fetchFromSupabase(limit = 24, sessionId?: string): Promise<ToolEvent[]> {
@@ -74,9 +92,9 @@ const DEMO_EVENTS: ToolEvent[] = [
     timestamp: new Date().toISOString(),
     tool_name: "check_sol",
     phase: "end",
-    session_id: "demo-session",
-    arguments: { state: "CA", accident_date: "2026-04-02" },
-    result: { sol_viable: true, sol_days_remaining: 612 },
+    session_id: "CA5703322862",
+    arguments: { state: "PA", accident_date: "2026-03-15" },
+    result: { sol_viable: true, sol_days_remaining: 730 },
     note: null,
     source: "api",
   },
@@ -85,9 +103,9 @@ const DEMO_EVENTS: ToolEvent[] = [
     timestamp: new Date().toISOString(),
     tool_name: "route_case",
     phase: "end",
-    session_id: "demo-session",
+    session_id: "CA5703322862",
     arguments: { case_type: "Auto accident" },
-    result: { decision: "qualified", attorney_tier: "senior" },
+    result: { decision: "qualified", attorney_tier: "associate" },
     note: null,
     source: "api",
   },

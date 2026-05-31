@@ -5,6 +5,19 @@ import type { Call, CallKpis } from "@/lib/types"
 const SELECT_COLS =
   "id, session_id, caller_name, caller_phone, caller_email, case_type, state, decision, urgency, severity_tier, red_flags, sol_viable, sol_days_remaining, emotional_state, attorney_tier, appointment_slot, has_prior_representation, transcript, call_ended_reason, started_at, ended_at"
 
+const DEMO_CALLER_PHONE = "5703322862"
+
+function phoneDigits(phone: string | null | undefined): string {
+  return (phone ?? "").replace(/\D/g, "")
+}
+
+function ensureDemoCall(calls: Call[]): Call[] {
+  const demo = MOCK_CALLS.find((c) => phoneDigits(c.caller_phone).includes(DEMO_CALLER_PHONE))
+  if (!demo) return calls
+  if (calls.some((c) => phoneDigits(c.caller_phone).includes(DEMO_CALLER_PHONE))) return calls
+  return [demo, ...calls]
+}
+
 export async function fetchCalls(): Promise<{ calls: Call[]; live: boolean }> {
   if (!isSupabaseConfigured || !supabase) {
     return { calls: MOCK_CALLS, live: false }
@@ -15,10 +28,10 @@ export async function fetchCalls(): Promise<{ calls: Call[]; live: boolean }> {
     .order("ended_at", { ascending: false })
     .limit(200)
 
-  if (error || !data) {
-    return { calls: [], live: false }
+  if (error || !data || data.length === 0) {
+    return { calls: MOCK_CALLS, live: false }
   }
-  return { calls: data as unknown as Call[], live: true }
+  return { calls: ensureDemoCall(data as unknown as Call[]), live: true }
 }
 
 export function computeKpis(calls: Call[]): CallKpis {
