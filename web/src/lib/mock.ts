@@ -2,6 +2,10 @@ import type { Call } from "@/lib/types"
 
 export const FIRM_NAME = "Hartley & Associates"
 export const FIRM_TAGLINE = "Personal Injury · California & Nevada"
+export const PRODUCT_NAME = "FirstCall"
+export const PRODUCT_TAGLINE = "AI intake for personal injury law firms"
+export const PRODUCT_DESCRIPTION =
+  "Answer every call, screen leads, and route qualified cases — with live visibility for your team."
 export const AGENT_NAME = "Aria"
 export const AGENT_PROVIDER = "Pipecat Cloud · NVIDIA Nemotron 3 Super"
 
