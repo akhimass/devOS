@@ -2,12 +2,13 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { Check } from "lucide-react"
 import { Wordmark } from "@/components/Logo"
+import { FIRM_NAME, FIRM_TAGLINE } from "@/lib/mock"
 import { useAuth } from "@/auth/AuthProvider"
 
 const POINTS = [
-  "Live tool-call telemetry (check_sol, route_case, end_call)",
-  "Twilio intake line +1 (385) 363-4730 wired to Supabase",
-  "Qualified / declined disposition with full transcripts",
+  "Review qualified and declined calls in one place",
+  "After-hours coverage on +1 (385) 363-4730",
+  "Secure access for Hartley & Associates team members",
 ]
 
 export default function AuthLayout({
@@ -43,10 +44,10 @@ export default function AuthLayout({
         <div className="relative flex h-full flex-col justify-center px-16">
           <div className="max-w-md">
             <div className="text-sm font-medium text-primary-foreground/60">
-              Hartley & Associates · Aria intake
+              {FIRM_NAME} · {FIRM_TAGLINE}
             </div>
             <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-tight">
-              Technical dashboard for live PI intake.
+              Member sign-in for your firm dashboard.
             </h2>
             <ul className="mt-8 space-y-4">
               {POINTS.map((p) => (

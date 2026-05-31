@@ -75,7 +75,7 @@ export default function Calls() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Calls</h1>
           <p className="text-xs text-muted-foreground">
-            Intake handled by Aria · Hartley & Associates
+            Hartley & Associates · Aria
           </p>
         </div>
         <Badge variant={live ? "success" : "outline"}>

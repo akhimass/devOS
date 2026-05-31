@@ -186,7 +186,7 @@ export default function Live() {
           {/* Calls + transcript */}
           <section className="space-y-4">
             <div>
-              <h2 className="text-sm font-semibold">Intake calls</h2>
+              <h2 className="text-sm font-semibold">Recent calls</h2>
               <p className="text-xs text-muted-foreground">
                 Live calls from Supabase (Twilio line +13853634730).
               </p>

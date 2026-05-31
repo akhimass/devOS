@@ -9,6 +9,7 @@ import {
 import { Wordmark } from "@/components/Logo"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/auth/AuthProvider"
+import { FIRM_TAGLINE } from "@/lib/mock"
 import { cn } from "@/lib/utils"
 
 const NAV = [
@@ -50,7 +51,7 @@ export default function ConsoleLayout() {
                 {firmName ?? "Your firm"}
               </div>
               <div className="text-xs text-muted-foreground">
-                Personal Injury · Aria intake agent
+                {FIRM_TAGLINE}
               </div>
             </div>
           </div>
