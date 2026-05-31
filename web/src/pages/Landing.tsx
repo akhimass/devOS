@@ -276,7 +276,7 @@ export default function Landing() {
               to voicemail. It paid for itself before Monday.&rdquo;
             </p>
             <footer className="mt-6 text-sm text-muted-foreground">
-              <strong className="text-foreground">Dana Morrison</strong> · Managing Partner, Morrison
+              <strong className="text-foreground">James Hartley</strong> · Managing Partner, Hartley
               &amp; Associates
             </footer>
           </blockquote>
