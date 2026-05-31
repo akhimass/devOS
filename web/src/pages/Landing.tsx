@@ -106,9 +106,6 @@ export default function Landing() {
               <Button asChild size="lg">
                 <Link to="/signin">Open dashboard</Link>
               </Button>
-              <Button asChild variant="outline" size="lg">
-                <Link to="/app/live">Live view</Link>
-              </Button>
             </div>
             <p className="mt-6 text-sm text-muted-foreground">
               No credit card required · Live in under 10 minutes · Trusted by 200+ PI firms

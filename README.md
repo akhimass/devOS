@@ -63,3 +63,18 @@ Cekura went in last and changed how we iterated. We wired Cekura Observability i
 - Krisp VIVA wasn't enough on its own for telephony. Krisp is doing real work — without it, background noise was tripping VAD constantly — but on a live phone line it couldn't fully isolate the caller's voice from line noise and room echo. We had to layer Krisp with raised VAD thresholds (VAD_CONFIDENCE=0.7, VAD_MIN_VOLUME=0.55) and increased VAD_START_SECS to suppress false triggers. Even then, the combination felt like a workaround rather than a clean solution. Tighter Krisp integration tuned specifically for telephony audio profiles (not just conferencing) would help significantly.
 - FilterIncompleteUserTurnStrategies breaks on noisy phone lines. LLM-gated turn detection stalled completely — background noise fragmented transcripts so the LLM kept returning incomplete markers and the bot never replied. This was the "agent goes silent" bug. VAD-silence-based turn detection should be the default for telephony paths, not an opt-in.
 - Detected language from STT doesn't flow downstream to TTS. For multilingual pipelines, Magpie needs a language pin (MAGPIE_LANGUAGE) rather than being able to follow what Parakeet detected. Auto-propagating the STT's detected language to TTS would make multilingual support genuinely seamless.
+
+## Live demo — Hartley & Associates
+
+**Console:** [https://firstcalllaw.vercel.app](https://firstcalllaw.vercel.app)
+
+| | |
+|---|---|
+| **Firm** | Hartley & Associates (Personal Injury · California & Nevada) |
+| **Sign in** | `hartley@firstcall.app` |
+| **Password** | `hartley123` |
+| **Intake line** | +1 (385) 363-4730 |
+
+After sign-in, use **Overview**, **Calls**, **Live** (tool telemetry), and **Cekura** (eval scores) in the sidebar.
+
+For local setup (Tool Events API, Pipecat secrets, Supabase), see [SETUP.md](./SETUP.md).

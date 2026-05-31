@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { Check } from "lucide-react"
 import { Wordmark } from "@/components/Logo"
 import { FIRM_NAME, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/mock"
-import { useAuth } from "@/auth/AuthProvider"
+import { isSupabaseConfigured } from "@/lib/supabase"
 
 const POINTS = [
   "Live call activity and disposition tracking",
@@ -20,7 +20,6 @@ export default function AuthLayout({
   subtitle: string
   children: ReactNode
 }) {
-  const { demoMode } = useAuth()
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="flex flex-col px-6 py-8 sm:px-12 lg:px-16">
@@ -32,9 +31,9 @@ export default function AuthLayout({
             <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
             <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>
             <div className="mt-8">{children}</div>
-            {demoMode && (
+            {!isSupabaseConfigured && (
               <p className="mt-6 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                Demo mode — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for live data.
+                Sign-in is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
               </p>
             )}
           </div>
