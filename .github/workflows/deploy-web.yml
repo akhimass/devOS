@@ -15,6 +15,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: team_4aP0zGgwfcWsbVFqmBSTZ7SY
+      VERCEL_PROJECT_ID: prj_R0duOQlulhksnG5FZlXnv0j5zG4R
     defaults:
       run:
         working-directory: web
