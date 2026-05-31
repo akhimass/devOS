@@ -1,17 +1,12 @@
 name: Deploy Web to Vercel
 
-# Production URL: https://firstcalllaw.vercel.app/
-# Project: https://vercel.com/akhimass-projects/firstcall
+# Production: https://firstcalllaw.vercel.app/
+# Vercel project: https://vercel.com/akhimass-projects/firstcall
 #
-# Preferred: connect Git on that Vercel project (root directory: web).
-# This workflow only runs when akhimass-projects IDs are set in GitHub secrets.
+# Use Vercel Git on that project (repo akhimass/devOS, root directory web) for
+# automatic deploys. This workflow is manual-only backup via Actions.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "web/**"
-      - ".github/workflows/deploy-web.yml"
   workflow_dispatch:
 
 concurrency:
@@ -20,7 +15,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     runs-on: ubuntu-latest
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
