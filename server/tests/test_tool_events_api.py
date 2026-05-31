@@ -16,6 +16,27 @@ def test_tool_events_api_requires_bearer_token(monkeypatch, tmp_path):
     assert response.status_code == 401
 
 
+def test_tool_events_api_allows_cors_preflight(monkeypatch, tmp_path):
+    monkeypatch.setenv("TOOL_EVENTS_DB_PATH", str(tmp_path / "events.sqlite3"))
+    monkeypatch.setenv(
+        "TOOL_EVENTS_CORS_ORIGINS",
+        "https://firstcalllaw.vercel.app",
+    )
+
+    client = TestClient(api.app)
+    response = client.options(
+        "/tool-events",
+        headers={
+            "Origin": "https://firstcalllaw.vercel.app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://firstcalllaw.vercel.app"
+
+
 def test_tool_events_api_round_trip(monkeypatch, tmp_path):
     monkeypatch.setenv("TOOL_EVENTS_DB_PATH", str(tmp_path / "events.sqlite3"))
     monkeypatch.setenv("TOOL_EVENTS_API_TOKEN", "secret-token")

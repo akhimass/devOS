@@ -10,6 +10,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 load_dotenv(override=True)
@@ -39,6 +40,17 @@ def db_path() -> Path:
 
 def api_token() -> str | None:
     return os.getenv("TOOL_EVENTS_API_TOKEN", "").strip() or None
+
+
+def cors_origins() -> list[str]:
+    """Origins allowed to call this API from the browser (Vercel app, local dev)."""
+    raw = os.getenv(
+        "TOOL_EVENTS_CORS_ORIGINS",
+        "http://localhost:5173,https://firstcalllaw.vercel.app",
+    ).strip()
+    if raw == "*":
+        return ["*"]
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 def _ensure_db() -> None:
@@ -98,6 +110,14 @@ def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
 
 
 app = FastAPI(title=APP_TITLE)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.get("/health")

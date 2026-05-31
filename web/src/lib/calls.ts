@@ -16,8 +16,7 @@ export async function fetchCalls(): Promise<{ calls: Call[]; live: boolean }> {
     .limit(200)
 
   if (error || !data) {
-    // Fall back to mock so the console is never empty in a demo.
-    return { calls: MOCK_CALLS, live: false }
+    return { calls: [], live: false }
   }
   return { calls: data as unknown as Call[], live: true }
 }

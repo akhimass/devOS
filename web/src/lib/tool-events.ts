@@ -18,26 +18,31 @@ async function fetchFromApi(limit = 24, sessionId?: string): Promise<ToolEvent[]
   if (sessionId) params.set("session_id", sessionId)
   const headers: Record<string, string> = {}
   if (API_TOKEN?.trim()) headers.Authorization = `Bearer ${API_TOKEN.trim()}`
-  const res = await fetch(`${API_URL.replace(/\/$/, "")}/tool-events?${params}`, {
-    headers,
-  })
-  if (!res.ok) return []
-  const payload = (await res.json()) as unknown
-  if (!Array.isArray(payload)) return []
-  return payload.map((row) => ({
-    id: (row as { id?: number }).id ?? crypto.randomUUID(),
-    timestamp: String((row as { timestamp?: string }).timestamp ?? ""),
-    tool_name: String((row as { tool_name?: string }).tool_name ?? "unknown"),
-    phase: String((row as { phase?: string }).phase ?? ""),
-    session_id: ((row as { session_id?: string }).session_id as string | null) ?? null,
-    arguments: ((row as { arguments?: Record<string, unknown> }).arguments ?? {}) as Record<
-      string,
-      unknown
-    >,
-    result: (row as { result?: unknown }).result ?? null,
-    note: ((row as { note?: string | null }).note as string | null) ?? null,
-    source: "api" as const,
-  }))
+  try {
+    const res = await fetch(`${API_URL.replace(/\/$/, "")}/tool-events?${params}`, {
+      headers,
+    })
+    if (!res.ok) return []
+    const payload = (await res.json()) as unknown
+    if (!Array.isArray(payload)) return []
+    return payload.map((row) => ({
+      id: (row as { id?: number }).id ?? crypto.randomUUID(),
+      timestamp: String((row as { timestamp?: string }).timestamp ?? ""),
+      tool_name: String((row as { tool_name?: string }).tool_name ?? "unknown"),
+      phase: String((row as { phase?: string }).phase ?? ""),
+      session_id: ((row as { session_id?: string }).session_id as string | null) ?? null,
+      arguments: ((row as { arguments?: Record<string, unknown> }).arguments ?? {}) as Record<
+        string,
+        unknown
+      >,
+      result: (row as { result?: unknown }).result ?? null,
+      note: ((row as { note?: string | null }).note as string | null) ?? null,
+      source: "api" as const,
+    }))
+  } catch {
+    // CORS/network failure — caller falls back to Supabase model_events.
+    return []
+  }
 }
 
 async function fetchFromSupabase(limit = 24, sessionId?: string): Promise<ToolEvent[]> {
