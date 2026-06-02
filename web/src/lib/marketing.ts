@@ -202,10 +202,10 @@ export const PRICING_FAQ = [
 ] as const
 
 export const STATS = [
-  { value: "24/7", label: "Always answering, never on hold" },
-  { value: "3.2×", label: "More qualified leads captured" },
+  { value: "24/7", label: "Always answering" },
   { value: "<1s", label: "Average response latency" },
-  { value: "$4,200", label: "Saved monthly vs. answering services" },
+  { value: "25+", label: "Languages supported" },
+  { value: "6-stage", label: "Intake flow per call" },
 ] as const
 
 export function planSignupHref(planId: PricingPlanId): string {
