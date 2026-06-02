@@ -6,7 +6,7 @@ const YC_ORANGE = "#FF6600"
 export function YCombinatorWordmark({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 138 24"
+      viewBox="0 0 116 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={cn("inline-block shrink-0", className)}
