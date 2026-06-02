@@ -22,7 +22,7 @@ export function BackedBy({ className }: { className?: string }) {
     >
       <p className="flex max-w-[18rem] shrink-0 flex-wrap items-center justify-center gap-x-2 gap-y-1.5 text-center sm:max-w-none sm:justify-start sm:text-left">
         <span className={LABEL_CLASS}>Built at</span>
-        <YCombinatorWordmark className="h-[18px] w-auto text-foreground/70 sm:h-5" />
+        <YCombinatorWordmark className="h-[18px] sm:h-5" />
         <span className={LABEL_CLASS}>Voice Agents Hackathon with</span>
       </p>
       <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 sm:gap-x-10">
