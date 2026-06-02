@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, FileText } from "lucide-react"
 import MarketingLayout from "@/components/MarketingLayout"
 import { BackedBy } from "@/components/BackedBy"
 import { LogoMark } from "@/components/Logo"
@@ -7,18 +7,61 @@ import { Button } from "@/components/ui/button"
 import { FEATURES, STATS } from "@/lib/marketing"
 
 const MOCK_ROWS = [
-  { caller: "Caller · (570) 332-2862", type: "Auto accident", disposition: "Qualified", score: "92", ok: true },
-  { caller: "Maria Delgado", type: "Auto accident", disposition: "Qualified", score: "96", ok: true },
-  { caller: "James Okafor", type: "Slip & fall", disposition: "Qualified", score: "91", ok: true },
-  { caller: "Priya Nair", type: "Auto accident", disposition: "Declined", score: "88", ok: false },
-  { caller: "Carlos Mendoza", type: "Auto · ES", disposition: "Qualified", score: "94", ok: true },
+  {
+    caller: "Caller · (570) 332-2862",
+    type: "Auto accident",
+    disposition: "Qualified",
+    score: "92",
+    caseValue: "$186K",
+    summary: "intake-570332.pdf",
+    ok: true,
+  },
+  {
+    caller: "Maria Delgado",
+    type: "Auto accident",
+    disposition: "Qualified",
+    score: "96",
+    caseValue: "$240K",
+    summary: "intake-delgado.pdf",
+    ok: true,
+  },
+  {
+    caller: "James Okafor",
+    type: "Slip & fall",
+    disposition: "Qualified",
+    score: "91",
+    caseValue: "$92K",
+    summary: "intake-okafor.pdf",
+    ok: true,
+  },
+  {
+    caller: "Priya Nair",
+    type: "Auto accident",
+    disposition: "Declined",
+    score: "88",
+    caseValue: "—",
+    summary: "—",
+    ok: false,
+  },
+  {
+    caller: "Carlos Mendoza",
+    type: "Auto · ES",
+    disposition: "Qualified",
+    score: "94",
+    caseValue: "$310K",
+    summary: "intake-mendoza.pdf",
+    ok: true,
+  },
 ] as const
+
+const TABLE_COLS =
+  "grid-cols-[minmax(7rem,1.15fr)_minmax(5rem,0.85fr)_minmax(5.5rem,0.9fr)_2.5rem_minmax(3.5rem,0.65fr)_minmax(5.5rem,0.85fr)]"
 
 export default function Landing() {
   return (
     <MarketingLayout>
-      <section className="mx-auto max-w-6xl px-6 pb-6 pt-8 md:pt-10">
-        <div className="grid items-center gap-6 lg:grid-cols-2 lg:gap-8">
+      <section className="mx-auto max-w-7xl px-6 pb-6 pt-8 md:pt-10">
+        <div className="grid items-center gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-10 xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
           <div className="text-center lg:text-left">
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1 text-sm text-muted-foreground">
               <span className="size-2 rounded-full bg-emerald-500" />
@@ -40,15 +83,15 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="w-full lg:max-w-none">
+          <div className="w-full min-w-0 lg:max-w-none">
             <div className="overflow-hidden rounded-xl border border-border bg-card shadow-lg">
               <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-3">
                 <span className="size-3 rounded-full bg-[#ff5f57]" />
                 <span className="size-3 rounded-full bg-[#febc2e]" />
                 <span className="size-3 rounded-full bg-[#28c840]" />
               </div>
-              <div className="grid md:grid-cols-[180px_1fr]">
-                <aside className="hidden border-r border-border bg-muted/30 p-4 md:block">
+              <div className="grid md:grid-cols-[140px_minmax(0,1fr)]">
+                <aside className="hidden border-r border-border bg-muted/30 p-3 md:block">
                   <div className="mb-4 flex items-center gap-2 text-sm font-semibold">
                     <LogoMark className="size-6 rounded-sm" />
                     <span className="lowercase">firstcall</span>
@@ -66,8 +109,8 @@ export default function Landing() {
                     </div>
                   ))}
                 </aside>
-                <div className="p-4 sm:p-5">
-                  <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <div className="min-w-0 p-3 sm:p-4">
+                  <div className="mb-3 grid gap-2 sm:grid-cols-3">
                     {[
                       { label: "Calls today", value: "23" },
                       { label: "Qualified", value: "14", accent: true },
@@ -87,32 +130,51 @@ export default function Landing() {
                       </div>
                     ))}
                   </div>
-                  <div className="overflow-hidden rounded-lg border border-border">
-                    <div className="grid grid-cols-[1.3fr_1fr_1fr_0.7fr] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <span>Caller</span>
-                      <span>Case type</span>
-                      <span>Disposition</span>
-                      <span>Score</span>
-                    </div>
-                    {MOCK_ROWS.map((row) => (
+                  <div className="overflow-x-auto rounded-lg border border-border">
+                    <div className="min-w-[36rem]">
                       <div
-                        key={row.caller}
-                        className="grid grid-cols-[1.3fr_1fr_1fr_0.7fr] gap-2 border-b border-border px-3 py-2.5 text-sm last:border-b-0"
+                        className={`grid ${TABLE_COLS} gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-[10px]`}
                       >
-                        <span className="truncate">{row.caller}</span>
-                        <span className="text-muted-foreground">{row.type}</span>
-                        <span>
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                              row.ok ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
-                            }`}
-                          >
-                            {row.disposition}
-                          </span>
-                        </span>
-                        <span>{row.score}</span>
+                        <span>Caller</span>
+                        <span>Case type</span>
+                        <span>Disposition</span>
+                        <span>Score</span>
+                        <span>Case value</span>
+                        <span>Summary</span>
                       </div>
-                    ))}
+                      {MOCK_ROWS.map((row) => (
+                        <div
+                          key={row.caller}
+                          className={`grid ${TABLE_COLS} gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 sm:text-sm`}
+                        >
+                          <span className="truncate">{row.caller}</span>
+                          <span className="truncate text-muted-foreground">{row.type}</span>
+                          <span>
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium sm:text-xs ${
+                                row.ok ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {row.disposition}
+                            </span>
+                          </span>
+                          <span>{row.score}</span>
+                          <span className="font-medium tabular-nums">{row.caseValue}</span>
+                          <span>
+                            {row.summary === "—" ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <span className="inline-flex max-w-full items-center gap-1 truncate text-primary">
+                                <FileText className="size-3 shrink-0" />
+                                <span className="truncate underline decoration-primary/40 underline-offset-2">
+                                  {row.summary}
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
