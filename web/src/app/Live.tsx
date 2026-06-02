@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { DecisionBadge, UrgencyBadge } from "@/components/CallBadges"
 import { fetchCalls, durationLabel, whenLabel } from "@/lib/calls"
 import { fetchToolEvents, toolEventsSourceLabel } from "@/lib/tool-events"
-import { AGENT_NAME, FIRM_NAME } from "@/lib/mock"
+import { AGENT_NAME } from "@/lib/mock"
+import { useAuth } from "@/auth/AuthProvider"
 import type { Call, ToolEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -85,6 +86,7 @@ function ToolEventCard({ event }: { event: ToolEvent }) {
 }
 
 export default function Live() {
+  const { firmName, twilioPhone } = useAuth()
   const [calls, setCalls] = useState<Call[]>([])
   const [events, setEvents] = useState<ToolEvent[]>([])
   const [selected, setSelected] = useState<Call | null>(null)
@@ -132,7 +134,8 @@ export default function Live() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Live dashboard</h1>
           <p className="text-xs text-muted-foreground">
-            {FIRM_NAME} · {AGENT_NAME} · +1 (385) 363-4730
+            {firmName ?? "Your firm"} · {AGENT_NAME}
+            {twilioPhone ? ` · ${twilioPhone}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -188,12 +191,19 @@ export default function Live() {
             <div>
               <h2 className="text-sm font-semibold">Recent calls</h2>
               <p className="text-xs text-muted-foreground">
-                Live calls from Supabase (Twilio line +13853634730).
+                {twilioPhone
+                  ? `Calls to your intake line ${twilioPhone} (RLS-scoped to your firm).`
+                  : "Calls scoped to your firm via Supabase RLS."}
               </p>
             </div>
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <div className="max-h-64 divide-y divide-border overflow-y-auto">
-                {calls.map((call) => (
+                {calls.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No calls yet for your firm. They&apos;ll appear here once your intake line is live.
+                  </p>
+                ) : (
+                  calls.map((call) => (
                   <button
                     key={call.id}
                     type="button"
@@ -216,7 +226,8 @@ export default function Live() {
                     </div>
                     <DecisionBadge decision={call.decision} />
                   </button>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 

@@ -6,7 +6,6 @@ import {
   type ReactNode,
 } from "react"
 import { supabase, isSupabaseConfigured } from "@/lib/supabase"
-import { FIRM_NAME } from "@/lib/mock"
 
 export interface SignUpArgs {
   email: string
@@ -20,6 +19,7 @@ interface AuthContextValue {
   authed: boolean
   email: string | null
   firmName: string | null
+  twilioPhone: string | null
   signUp: (a: SignUpArgs) => Promise<{ error?: string; needsConfirmation?: boolean }>
   signIn: (login: string, password: string) => Promise<{ error?: string }>
   signOut: () => Promise<void>
@@ -27,30 +27,38 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-async function loadFirmName(userId: string, fallback: string | null): Promise<string | null> {
-  if (!supabase) return fallback
+async function loadProfile(
+  userId: string,
+): Promise<{ firmName: string | null; twilioPhone: string | null }> {
+  if (!supabase) return { firmName: null, twilioPhone: null }
   try {
     const { data } = await supabase
       .from("profiles")
-      .select("firm_name")
+      .select("firm_name, twilio_phone")
       .eq("id", userId)
       .maybeSingle()
-    return data?.firm_name ?? fallback
+    return {
+      firmName: data?.firm_name ?? null,
+      twilioPhone: data?.twilio_phone ?? null,
+    }
   } catch {
-    return fallback
+    return { firmName: null, twilioPhone: null }
   }
 }
 
 function applyUser(
   user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> },
   setEmail: (v: string | null) => void,
-  setFirmName: (v: string | null) => void
+  setFirmName: (v: string | null) => void,
+  setTwilioPhone: (v: string | null) => void,
 ) {
-  const fallback = (user.user_metadata?.firm_name as string | undefined) ?? FIRM_NAME
+  const metaFirm = (user.user_metadata?.firm_name as string | undefined) ?? null
   setEmail(user.email ?? null)
-  setFirmName(fallback)
-  void loadFirmName(user.id, fallback).then((name) => {
-    if (name) setFirmName(name)
+  setFirmName(metaFirm)
+  setTwilioPhone(null)
+  void loadProfile(user.id).then(({ firmName, twilioPhone }) => {
+    if (firmName) setFirmName(firmName)
+    setTwilioPhone(twilioPhone)
   })
 }
 
@@ -58,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
   const [firmName, setFirmName] = useState<string | null>(null)
+  const [twilioPhone, setTwilioPhone] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -71,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data } = await supabase.auth.getSession()
       if (!active) return
       const u = data.session?.user
-      if (u) applyUser(u, setEmail, setFirmName)
+      if (u) applyUser(u, setEmail, setFirmName, setTwilioPhone)
       setReady(true)
     }
 
@@ -88,9 +97,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!u) {
         setEmail(null)
         setFirmName(null)
+        setTwilioPhone(null)
         return
       }
-      applyUser(u, setEmail, setFirmName)
+      applyUser(u, setEmail, setFirmName, setTwilioPhone)
     })
 
     return () => {
@@ -110,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     if (error) return { error: error.message }
     if (data.session?.user) {
-      applyUser(data.session.user, setEmail, setFirmName)
+      applyUser(data.session.user, setEmail, setFirmName, setTwilioPhone)
       return {}
     }
     return { needsConfirmation: true }
@@ -125,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       password,
     })
     if (error) return { error: error.message }
-    if (data.user) applyUser(data.user, setEmail, setFirmName)
+    if (data.user) applyUser(data.user, setEmail, setFirmName, setTwilioPhone)
     return {}
   }
 
@@ -135,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setEmail(null)
     setFirmName(null)
+    setTwilioPhone(null)
   }
 
   return (
@@ -144,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authed: Boolean(email),
         email,
         firmName,
+        twilioPhone,
         signUp,
         signIn,
         signOut,

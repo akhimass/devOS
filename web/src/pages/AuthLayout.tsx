@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { Check } from "lucide-react"
 import { Wordmark } from "@/components/Logo"
-import { FIRM_NAME, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/mock"
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/mock"
 import { isSupabaseConfigured } from "@/lib/supabase"
 
 const POINTS = [
@@ -49,7 +49,8 @@ export default function AuthLayout({
               Sign in to your firm dashboard.
             </h2>
             <p className="mt-3 text-sm text-primary-foreground/80">
-              {FIRM_NAME} and other firms use {PRODUCT_NAME} for after-hours intake.
+              PI firms use {PRODUCT_NAME} for after-hours intake — each with their own line and
+              dashboard.
             </p>
             <ul className="mt-8 space-y-4">
               {POINTS.map((p) => (

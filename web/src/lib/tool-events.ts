@@ -135,6 +135,9 @@ export async function fetchToolEvents(opts?: {
   if (dbEvents.length > 0) {
     return { events: dbEvents, live: true }
   }
+  if (isSupabaseConfigured || isToolEventsApiConfigured) {
+    return { events: [], live: true }
+  }
   return { events: DEMO_EVENTS, live: false }
 }
 

@@ -47,14 +47,7 @@ export default function App() {
         <Route path="/features" element={<Features />} />
         <Route path="/how-it-works" element={<HowItWorks />} />
         <Route path="/pricing" element={<Pricing />} />
-        <Route
-          path="/signin"
-          element={
-            <PublicOnly>
-              <SignIn />
-            </PublicOnly>
-          }
-        />
+        <Route path="/signin" element={<SignIn />} />
         <Route
           path="/signup"
           element={

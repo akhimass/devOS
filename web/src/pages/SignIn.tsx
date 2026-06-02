@@ -6,10 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/auth/AuthProvider"
-import { FIRM_NAME } from "@/lib/mock"
 
 export default function SignIn() {
-  const { signIn } = useAuth()
+  const { authed, email, firmName, signIn, signOut } = useAuth()
   const navigate = useNavigate()
   const [login, setLogin] = useState("")
   const [password, setPassword] = useState("")
@@ -29,19 +28,43 @@ export default function SignIn() {
     navigate("/app/overview", { replace: true })
   }
 
+  if (authed) {
+    return (
+      <AuthLayout
+        title="Already signed in"
+        subtitle={
+          firmName
+            ? `You're signed in as ${email} at ${firmName}.`
+            : `You're signed in as ${email}.`
+        }
+      >
+        <div className="space-y-3">
+          <Button asChild className="w-full">
+            <Link to="/app/overview">Continue to dashboard</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => void signOut()}
+          >
+            Sign out and use a different account
+          </Button>
+        </div>
+      </AuthLayout>
+    )
+  }
+
   return (
-    <AuthLayout
-      title="Sign in"
-      subtitle={`${FIRM_NAME} team members only.`}
-    >
+    <AuthLayout title="Sign in" subtitle="Sign in with your firm workspace email.">
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="login">Username or email</Label>
+          <Label htmlFor="login">Email</Label>
           <Input
             id="login"
-            type="text"
+            type="email"
             autoComplete="username"
-            placeholder="hartley@firstcall.app"
+            placeholder="you@firm.com"
             value={login}
             onChange={(e) => setLogin(e.target.value)}
             required
