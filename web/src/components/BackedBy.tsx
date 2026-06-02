@@ -16,8 +16,8 @@ export function BackedBy({ className }: { className?: string }) {
         className,
       )}
     >
-      <p className="shrink-0 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-        Backed by
+      <p className="max-w-[14rem] shrink-0 text-center text-[10px] font-semibold uppercase leading-snug tracking-[0.18em] text-muted-foreground sm:max-w-none sm:text-left sm:text-xs sm:tracking-[0.22em]">
+        Built at YC Voice Agents Hackathon with
       </p>
       <ul className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 sm:gap-x-10">
         {PARTNERS.map(({ name, src, className: logoClass }) => (
